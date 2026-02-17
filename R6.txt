@@ -1,0 +1,17 @@
+#!/bin/bash
+apt update && apt install -y frr
+sed -i 's/eigrpd=no/eigrpd=yes/' /etc/frr/daemons
+cat <<EOF > /etc/frr/frr.conf
+interface enp0s3
+ ip address 200.0.0.22/30
+interface enp0s8
+ ip address 200.0.0.25/30
+interface enp0s9
+ ip address 10.0.0.17/29
+router eigrp 10
+ network 200.0.0.20/30
+ network 200.0.0.24/30
+ network 10.0.0.16/29
+ redistribute connected
+EOF
+systemctl restart frr

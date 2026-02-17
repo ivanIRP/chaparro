@@ -1,0 +1,15 @@
+#!/bin/bash
+apt update && apt install -y frr
+echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf && sysctl -p
+sed -i 's/ripd=no/ripd=yes/' /etc/frr/daemons
+cat <<EOF > /etc/frr/frr.conf
+interface enp0s3
+ ip address 200.0.0.1/30
+interface enp0s8
+ ip address 10.0.0.1/29
+router rip
+ network 200.0.0.0/30
+ network 10.0.0.0/29
+ redistribute connected
+EOF
+systemctl restart frr
