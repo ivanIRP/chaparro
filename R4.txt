@@ -1,36 +1,20 @@
-#!/bin/bash
-# 1. Instalación de paquetes y preparación del sistema
-apt update && apt install -y frr traceroute
-echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf && sysctl -p
-
-# 2. Habilitar el demonio OSPF
+apt update && apt install -y frr
 sed -i 's/ospfd=no/ospfd=yes/' /etc/frr/daemons
-
-# 3. Configuración de interfaces y protocolo OSPF
-cat <<EOF > /etc/frr/frr.conf
-!
-interface enp0s3
- description ENLACE_HACIA_R3_AREA1
- ip address 200.0.0.14/30
-!
-interface enp0s8
- description ENLACE_HACIA_R5_AREA2
- ip address 200.0.0.17/30
-!
-router ospf
- ospf router-id 4.4.4.4
- ! Red hacia R3 en el Área 1
- network 200.0.0.12/30 area 1
- ! Red hacia R5 en el Área 2
- network 200.0.0.16/30 area 2
-!
-EOF
-
-# 4. Reiniciar el servicio para aplicar cambios
+sed -i 's/ripd=no/ripd=yes/' /etc/frr/daemons
+sed -i 's/eigrpd=no/eigrpd=yes/' /etc/frr/daemons
+echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+sysctl -p
 systemctl restart frr
 
-echo "---------------------------------------------------"
-echo "R4 configurado como Router OSPF (Área 1 y Área 2)"
-echo "Interfaz enp0s3 (lan34): 200.0.0.14/30"
-echo "Interfaz enp0s8 (lan45): 200.0.0.17/30"
-echo "---------------------------------------------------"
+cat <<EOF > /etc/frr/frr.conf
+interface enp0s3
+ ip address 200.0.0.14/30
+interface enp0s8
+ ip address 200.0.0.17/30
+router ospf
+ ospf router-id 1.1.1.3
+ network 200.0.0.12/30 area 1
+ network 200.0.0.16/30 area 2
+ area 1 virtual-link 1.1.1.2
+EOF
+systemctl restart frr
