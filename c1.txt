@@ -16,4 +16,4 @@ echo "9.0.0.100 mail.acme.net" >> /etc/hosts
 apt update && apt install -y evolution
 
 echo "--- MÁQUINA DE IVAN LISTA ---"
-echo "Usa ivan@acme.net / pass: 123"
+echo "Usa pepe@acme.net / pass: 123"

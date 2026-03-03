@@ -32,8 +32,8 @@ sed -i 's/#mail_location =/mail_location = maildir:~\/Maildir/' /etc/dovecot/con
 sed -i 's/disable_plaintext_auth = yes/disable_plaintext_auth = no/' /etc/dovecot/conf.d/10-auth.conf
 sed -i 's/ssl = yes/ssl = no/' /etc/dovecot/conf.d/10-ssl.conf
 
-# 5. Creación de usuarios solicitados (ivan, jc, android)
-for user in ivan jc android; do
+# 5. Creación de usuarios solicitados (pepe, jc, android)
+for user in pepe jc android; do
     if ! id "$user" &>/dev/null; then
         useradd -m -s /bin/bash $user
         echo "$user:123" | chpasswd
