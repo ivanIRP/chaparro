@@ -1,5 +1,16 @@
 #!/bin/bash
-apt update && apt install -y iproute2 traceroute
-ip addr flush dev enp0s3
-ip addr add 10.0.0.2/29 dev enp0s3
-ip route add default via 10.0.0.1
+# Ejecutar como root en el Cliente 1
+
+# 1. Configuración de IP
+cat <<EOF > /etc/network/interfaces
+auto enp0s3
+iface enp0s3 inet static
+    address 9.0.0.10
+    netmask 255.255.255.0
+EOF
+systemctl restart networking
+
+# 2. Instalación de Evolution (Sustituto de Outlook en Debian)
+apt update && apt install -y evolution
+
+echo "Configuración completada para ivan@acme.net"

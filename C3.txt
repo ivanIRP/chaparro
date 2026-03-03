@@ -1,5 +1,0 @@
-#!/bin/bash
-apt update && apt install -y iproute2 traceroute
-ip addr flush dev enp0s3
-ip addr add 10.0.0.18/29 dev enp0s3
-ip route add default via 10.0.0.17

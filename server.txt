@@ -1,0 +1,38 @@
+#!/bin/bash
+# Ejecutar como root en el Servidor
+
+# 1. Configuración de Red
+cat <<EOF > /etc/network/interfaces
+auto lo
+iface lo inet loopback
+
+auto enp0s3
+iface enp0s3 inet static
+    address 9.0.0.100
+    netmask 255.255.255.0
+EOF
+systemctl restart networking
+
+# 2. Instalación de Postfix y Dovecot
+apt update && apt install -y postfix dovecot-imapd dovecot-pop3d
+
+# 3. Configuración básica de Postfix
+postconf -e "myhostname = mail.acme.net"
+postconf -e "mydestination = mail.acme.net, acme.net, localhost"
+postconf -e "mynetworks = 127.0.0.0/8, 9.0.0.0/24"
+postconf -e "home_mailbox = Maildir/"
+
+# 4. Configuración de Dovecot (Maildir y Auth)
+sed -i 's/#mail_location =/mail_location = maildir:~\/Maildir/' /etc/dovecot/conf.d/10-mail.conf
+sed -i 's/disable_plaintext_auth = yes/disable_plaintext_auth = no/' /etc/dovecot/conf.d/10-auth.conf
+
+# 5. Creación de usuarios (Cambiado pepe por ivan)
+for user in ivan jc android; do
+    useradd -m -s /bin/bash $user
+    echo "$user:password123" | chpasswd
+    mkdir -p /home/$user/Maildir
+    chown -R $user:$user /home/$user/Maildir
+done
+
+systemctl restart postfix dovecot
+echo "Servidor listo. Usuarios creados: ivan, jc, android."
