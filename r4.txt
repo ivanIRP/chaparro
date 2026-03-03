@@ -1,0 +1,25 @@
+#!/bin/bash
+# Script de autoconfiguracion para Lab IPv6 + FRR
+
+# 1. Habilitar Forwarding IPv6
+echo "net.ipv6.conf.all.forwarding=1" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+
+# 2. Instalacion de paquetes necesarios
+sudo apt update && sudo apt install -y frr frr-pythontools traceroute iputils-ping smbclient
+
+# 3. Habilitar demonios de FRR (necesario para Zebra)
+sudo sed -i 's/zebra=no/zebra=yes/' /etc/frr/daemons
+sudo sed -i 's/staticd=no/staticd=yes/' /etc/frr/daemons
+sudo systemctl restart frr
+vtysh
+conf t
+interface eth0
+ ipv6 address 2000::40/125
+exit
+interface eth1
+ ipv6 address 2000::1/124
+exit
+ipv6 route ::/0 2000::39/125
+exit
+write memory
