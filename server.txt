@@ -1,7 +1,8 @@
 #!/bin/bash
-# Ejecutar como root en el Servidor
+# CONFIGURACIÓN DEL SERVIDOR (9.0.0.100)
+# Ejecutar como root (sudo su)
 
-# 1. Configuración de Red
+# 1. Red Estática
 cat <<EOF > /etc/network/interfaces
 auto lo
 iface lo inet loopback
@@ -13,26 +14,36 @@ iface enp0s3 inet static
 EOF
 systemctl restart networking
 
-# 2. Instalación de Postfix y Dovecot
-apt update && apt install -y postfix dovecot-imapd dovecot-pop3d
+# 2. Instalación (Sin interacción para que sea automático)
+export DEBIAN_FRONTEND=noninteractive
+apt update
+apt install -y postfix dovecot-imapd dovecot-pop3d
 
-# 3. Configuración básica de Postfix
+# 3. Configuración de Postfix (MTA)
 postconf -e "myhostname = mail.acme.net"
 postconf -e "mydestination = mail.acme.net, acme.net, localhost"
 postconf -e "mynetworks = 127.0.0.0/8, 9.0.0.0/24"
 postconf -e "home_mailbox = Maildir/"
+postconf -e "smtputf8_enable = no"
 
-# 4. Configuración de Dovecot (Maildir y Auth)
+# 4. Configuración de Dovecot (MDA)
+# Habilitar autenticación de texto plano para el laboratorio
 sed -i 's/#mail_location =/mail_location = maildir:~\/Maildir/' /etc/dovecot/conf.d/10-mail.conf
 sed -i 's/disable_plaintext_auth = yes/disable_plaintext_auth = no/' /etc/dovecot/conf.d/10-auth.conf
+sed -i 's/ssl = yes/ssl = no/' /etc/dovecot/conf.d/10-ssl.conf
 
-# 5. Creación de usuarios (Cambiado pepe por ivan)
+# 5. Creación de usuarios solicitados (ivan, jc, android)
 for user in ivan jc android; do
-    useradd -m -s /bin/bash $user
-    echo "$user:password123" | chpasswd
-    mkdir -p /home/$user/Maildir
-    chown -R $user:$user /home/$user/Maildir
+    if ! id "$user" &>/dev/null; then
+        useradd -m -s /bin/bash $user
+        echo "$user:123" | chpasswd
+        # Crear estructura Maildir inicial
+        mkdir -p /home/$user/Maildir/{cur,new,tmp}
+        chown -R $user:$user /home/$user/Maildir
+        chmod -R 700 /home/$user/Maildir
+    fi
 done
 
+# 6. Reiniciar servicios
 systemctl restart postfix dovecot
-echo "Servidor listo. Usuarios creados: ivan, jc, android."
+echo "--- SERVIDOR mail.acme.net CONFIGURADO CORRECTAMENTE ---"

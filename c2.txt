@@ -1,7 +1,7 @@
 #!/bin/bash
-# Ejecutar como root en el Cliente 2
+# CONFIGURACIÓN CLIENTE JC (9.0.0.20)
+# Ejecutar como root
 
-# 1. Configuración de IP
 cat <<EOF > /etc/network/interfaces
 auto enp0s3
 iface enp0s3 inet static
@@ -10,7 +10,10 @@ iface enp0s3 inet static
 EOF
 systemctl restart networking
 
-# 2. Instalación de Thunderbird
+# Añadir el servidor al archivo hosts
+echo "9.0.0.100 mail.acme.net" >> /etc/hosts
+
 apt update && apt install -y thunderbird
 
-echo "Configuración completada para jc@acme.net"
+echo "--- MÁQUINA DE JC LISTA ---"
+echo "Usa jc@acme.net / pass: 123"

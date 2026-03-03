@@ -1,7 +1,7 @@
 #!/bin/bash
-# Ejecutar como root en el Cliente 1
+# CONFIGURACIÓN CLIENTE IVAN (9.0.0.10)
+# Ejecutar como root
 
-# 1. Configuración de IP
 cat <<EOF > /etc/network/interfaces
 auto enp0s3
 iface enp0s3 inet static
@@ -10,7 +10,10 @@ iface enp0s3 inet static
 EOF
 systemctl restart networking
 
-# 2. Instalación de Evolution (Sustituto de Outlook en Debian)
+# Añadir el servidor al archivo hosts para que resuelva el nombre
+echo "9.0.0.100 mail.acme.net" >> /etc/hosts
+
 apt update && apt install -y evolution
 
-echo "Configuración completada para ivan@acme.net"
+echo "--- MÁQUINA DE IVAN LISTA ---"
+echo "Usa ivan@acme.net / pass: 123"
