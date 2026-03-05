@@ -1,46 +1,59 @@
-# 1. Solicitar privilegios de Administrador si no los tiene
+$ErrorActionPreference = "Stop"
+
 if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Warning "Por favor, ejecuta este script como ADMINISTRADOR."
-    exit
+    Write-Host "[ERROR] Por favor, abre PowerShell como Administrador." -ForegroundColor Red
+    pause; exit
 }
 
-# 2. Identificar la interfaz activa
-$interface = Get-NetAdapter | Where-Object {$_.Status -eq "Up"} | Select-Object -First 1 -ExpandProperty Name
+Write-Host "--- Configuración de Clientes Windows ---" -ForegroundColor Cyan
+$opcion = Read-Host "Ingresa [1] si esta es la PC1 (Conectada a R2) o [2] si es la PC2 (Conectada a R3)"
 
-Write-Host "--- CONFIGURACIÓN DE LABORATORIO IPv6 ---" -ForegroundColor Yellow
-Write-Host "1. Configurar como PC1 (Red 2000::10/124)"
-Write-Host "2. Configurar como PC2 (Red 2000::20/124)"
-$choice = Read-Host "Selecciona una opción (1 o 2)"
-
-if ($choice -eq "1") {
-    $ip = "2000::10"
-    $gw = "2000::1"
-    $name = "PC1-Lab"
+if ($opcion -eq "1") {
+    $ip = "2000::10"; $gw = "2000::11"; $tag = "PC1"
+} elseif ($opcion -eq "2") {
+    $ip = "2000::20"; $gw = "2000::21"; $tag = "PC2"
 } else {
-    $ip = "2000::20"
-    $gw = "2000::1"
-    $name = "PC2-Lab"
+    Write-Host "[ERROR] Opción no válida." -ForegroundColor Red
+    pause; exit
 }
 
-# 3. Limpiar configuraciones previas y asignar IP
-Write-Host "Asignando IP $ip a la interfaz $interface..." -ForegroundColor Cyan
-Remove-NetIPAddress -InterfaceAlias $interface -AddressFamily IPv6 -Confirm:$false 2>$null
-New-NetIPAddress -InterfaceAlias $interface -IPAddress $ip -PrefixLength 124 -DefaultGateway $gw
-
-# 4. Crear y Compartir carpetas (Requerimiento del Lab)
-Write-Host "Creando carpetas compartidas..." -ForegroundColor Cyan
-$paths = "C:\Compartida_A", "C:\Compartida_B"
-foreach ($path in $paths) {
-    if (!(Test-Path $path)) { New-Item -Path $path -ItemType Directory }
-    # Compartir con permisos totales para 'Todos'
-    New-SmbShare -Name "$(Split-Path $path -Leaf)_$name" -Path $path -FullAccess Everyone -ErrorAction SilentlyContinue
+# 1. Configurar Adaptador de Red
+try {
+    $adapter = Get-NetAdapter | Where-Object {$_.Status -eq "Up"} | Select-Object -First 1
+    if (-not $adapter) { throw "No se detectó ningún cable de red conectado." }
+    
+    Write-Host "Configurando IPv6 en $($adapter.Name)..."
+    Remove-NetIPAddress -InterfaceIndex $adapter.InterfaceIndex -AddressFamily IPv6 -Confirm:$false -ErrorAction SilentlyContinue
+    New-NetIPAddress -InterfaceIndex $adapter.InterfaceIndex -IPAddress $ip -PrefixLength 124 -DefaultGateway $gw -AddressFamily IPv6 | Out-Null
+} catch {
+    Write-Host "[ERROR de Red] $($_.Exception.Message)" -ForegroundColor Red
+    pause; exit
 }
 
-# 5. Habilitar Reglas de Firewall (Crucial para Traceroute y SMB)
-Write-Host "Abriendo Firewall..." -ForegroundColor Cyan
-Enable-NetFirewallRule -DisplayName "Compartir archivos e impresoras (solicitud de eco: ICMPv6 de entrada)"
-Enable-NetFirewallRule -DisplayGroup "Compartir archivos e impresoras"
+# 2. Configurar Carpetas y Compartición
+try {
+    Write-Host "Generando carpetas compartidas..."
+    $rutas = @("C:\CarpetaA_$tag", "C:\CarpetaB_$tag")
+    
+    foreach ($ruta in $rutas) {
+        if (-not (Test-Path $ruta)) { New-Item -Path $ruta -ItemType Directory -Force | Out-Null }
+        $nombreShare = Split-Path $ruta -Leaf
+        Remove-SmbShare -Name $nombreShare -Force -ErrorAction SilentlyContinue
+        New-SmbShare -Name $nombreShare -Path $ruta -FullAccess Everyone | Out-Null
+    }
+} catch {
+    Write-Host "[ERROR de Archivos] $($_.Exception.Message)" -ForegroundColor Red
+    pause; exit
+}
 
-Write-Host "¡LISTO! Esta máquina ahora es $name." -ForegroundColor Green
-Write-Host "IP: $ip | Gateway: $gw"
+# 3. Reglas de Firewall
+try {
+    Write-Host "Aplicando reglas de Firewall para Ping y SMB..."
+    Enable-NetFirewallRule -DisplayName "Compartir archivos e impresoras (solicitud de eco: ICMPv6 de entrada)" -ErrorAction SilentlyContinue
+    Enable-NetFirewallRule -DisplayGroup "Compartir archivos e impresoras" -ErrorAction SilentlyContinue
+} catch {
+    Write-Host "[ADVERTENCIA] No se pudo ajustar el Firewall automáticamente." -ForegroundColor Yellow
+}
+
+Write-Host "[ÉXITO] Máquina configurada correctamente como $tag." -ForegroundColor Green
 pause
