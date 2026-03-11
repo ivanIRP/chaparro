@@ -1,110 +1,287 @@
-#!/bin/bash
-export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-pausa_exito() {
-    echo -e "\e[32m[OK] $1 verificado correctamente.\e[0m"
-    read -rp "Presiona Enter para continuar al siguiente paso..."
+function error_exit() {
+echo "ERROR: $1"
+exit 1
 }
 
-die() {
-    echo -e "\e[41m\e[97m[ERROR] $1\e[0m"
-    exit 1
+function check_root() {
+if [ "$EUID" -ne 0 ]; then
+error_exit "Debe ejecutar el script como root o con sudo."
+fi
 }
 
-if [ "$EUID" -ne 0 ]; then die "Debes ejecutar este script como root."; fi
+function check_frr() {
 
-echo -e "\e[36m=== PASO 1: Instalacion de Paquetes ===\e[0m"
-apt-get update -y || die "Fallo al actualizar repositorios."
-apt-get install -y frr traceroute iputils-ping || die "Fallo al instalar paquetes."
-
-if ! command -v vtysh &> /dev/null; then
-    die "El paquete FRR no se instalo correctamente."
+```
+if ! command -v vtysh &> /dev/null
+then
+    error_exit "FRR o vtysh no estan instalados."
+else
+    echo "FRR detectado correctamente."
 fi
-pausa_exito "Paquetes instalados"
+```
 
-echo -e "\n\e[36m=== PASO 2: Habilitar IPv6 Forwarding ===\e[0m"
-echo "net.ipv6.conf.all.forwarding=1" > /etc/sysctl.d/99-ipv6-forwarding.conf
-sysctl -p /etc/sysctl.d/99-ipv6-forwarding.conf > /dev/null 2>&1
+}
 
-if [ "$(cat /proc/sys/net/ipv6/conf/all/forwarding)" != "1" ]; then
-    die "El forwarding IPv6 no se activo en el kernel."
+function interface_exists() {
+
+```
+ip link show "$1" > /dev/null 2>&1
+
+if [ $? -ne 0 ]; then
+    return 1
+else
+    return 0
 fi
-pausa_exito "IPv6 Forwarding activo"
+```
 
-echo -e "\n\e[36m=== PASO 3: Configuracion de Demonios FRR ===\e[0m"
-mkdir -p /etc/frr
-cat <<EOF > /etc/frr/daemons
-zebra=yes
-bgpd=no
-ospfd=no
-ospf6d=no
-ripd=no
-ripngd=no
-isisd=no
-pimd=no
-ldpd=no
-nhrpd=no
-eigrpd=no
-babeld=no
-sharpd=no
-pbrd=no
-bfdd=no
-fabricd=no
-vrrpd=no
-pathd=no
-staticd=yes
-vtysh_enable=yes
+}
+
+function activate_interface() {
+
+```
+if interface_exists "$1"; then
+    ip link set "$1" up
+    echo "Interfaz $1 activada"
+else
+    echo "Interfaz $1 no existe"
+fi
+```
+
+}
+
+function clean_interface() {
+
+```
+if interface_exists "$1"; then
+    ip -6 addr flush dev "$1"
+fi
+```
+
+}
+
+function config_R0(){
+
+echo "Configurando Router R0..."
+
+IF1="eth0"
+IF2="eth1"
+IF3="eth2"
+
+if interface_exists $IF1 && interface_exists $IF2 && interface_exists $IF3
+then
+
+activate_interface $IF1
+activate_interface $IF2
+activate_interface $IF3
+
+clean_interface $IF1
+clean_interface $IF2
+clean_interface $IF3
+
+vtysh << EOF
+
+configure terminal
+
+hostname R0
+
+interface $IF1
+ipv6 address 2001:2::1/64
+ipv6 rip cisco enable
+
+interface $IF2
+ipv6 address 2001:1::1/64
+ipv6 rip cisco enable
+
+interface $IF3
+ipv6 address 2001:3::1/64
+ipv6 rip cisco enable
+
+ipv6 router rip cisco
+
+end
+write
+
 EOF
 
-if ! grep -q "zebra=yes" /etc/frr/daemons; then die "Zebra no se configuro."; fi
-if ! grep -q "staticd=yes" /etc/frr/daemons; then die "Staticd no se configuro."; fi
-pausa_exito "Demonios configurados"
+echo "Router R0 configurado correctamente."
 
-echo -e "\n\e[36m=== PASO 4: Asignacion de Interfaces y Topologia ===\e[0m"
-mapfile -t INTERFACES < <(ip -o link show | awk -F': ' '{print $2}' | grep -v 'lo')
-NUM_IFACES=${#INTERFACES[@]}
+else
 
-if [ "$NUM_IFACES" -lt 2 ]; then die "Necesitas al menos 2 interfaces activas."; fi
+echo "ERROR: Interfaces necesarias no encontradas."
+fi
 
-for iface in "${INTERFACES[@]}"; do ip link set dev "$iface" up; done
+}
 
-IF1=${INTERFACES[0]}
-IF2=${INTERFACES[1]}
-IF3=${INTERFACES[2]:-""}
+function config_R1(){
 
-echo -e "Interfaces disponibles: \e[33m$IF1, $IF2 ${IF3:+(y $IF3)}\e[0m"
-while true; do
-    read -rp "Que router es esta maquina? (0, 1, 2 o 3): " R_NUM
-    case $R_NUM in
-        0|1|2|3) break ;;
-        *) echo "Invalido. Usa 0, 1, 2 o 3." ;;
-    esac
+echo "Configurando Router R1..."
+
+IF1="eth0"
+IF2="eth1"
+IF3="eth2"
+
+if interface_exists $IF1 && interface_exists $IF2 && interface_exists $IF3
+then
+
+activate_interface $IF1
+activate_interface $IF2
+activate_interface $IF3
+
+clean_interface $IF1
+clean_interface $IF2
+clean_interface $IF3
+
+vtysh << EOF
+
+configure terminal
+
+hostname R1
+
+interface $IF1
+ipv6 address 2001:4::1/64
+ipv6 rip cisco enable
+
+interface $IF2
+ipv6 address 2001:5::1/64
+ipv6 rip cisco enable
+
+interface $IF3
+ipv6 address 2001:3::2/64
+ipv6 rip cisco enable
+
+ipv6 router rip cisco
+
+end
+write
+
+EOF
+
+echo "Router R1 configurado correctamente."
+
+else
+
+echo "ERROR: Interfaces necesarias no encontradas."
+fi
+
+}
+
+function config_PC0(){
+
+IF="eth0"
+
+if interface_exists $IF
+then
+
+activate_interface $IF
+clean_interface $IF
+
+ip -6 addr add 2001:2::2/64 dev $IF
+ip -6 route add default via 2001:2::1
+
+echo "PC0 configurada."
+
+else
+echo "ERROR: interfaz $IF no encontrada"
+fi
+
+}
+
+function config_PC1(){
+
+IF="eth0"
+
+if interface_exists $IF
+then
+
+activate_interface $IF
+clean_interface $IF
+
+ip -6 addr add 2001:1::2/64 dev $IF
+ip -6 route add default via 2001:1::1
+
+echo "PC1 configurada."
+
+else
+echo "ERROR: interfaz $IF no encontrada"
+fi
+
+}
+
+function config_PC2(){
+
+IF="eth0"
+
+if interface_exists $IF
+then
+
+activate_interface $IF
+clean_interface $IF
+
+ip -6 addr add 2001:5::2/64 dev $IF
+ip -6 route add default via 2001:5::1
+
+echo "PC2 configurada."
+
+else
+echo "ERROR: interfaz $IF no encontrada"
+fi
+
+}
+
+function config_PC3(){
+
+IF="eth0"
+
+if interface_exists $IF
+then
+
+activate_interface $IF
+clean_interface $IF
+
+ip -6 addr add 2001:4::2/64 dev $IF
+ip -6 route add default via 2001:4::1
+
+echo "PC3 configurada."
+
+else
+echo "ERROR: interfaz $IF no encontrada"
+fi
+
+}
+
+check_root
+check_frr
+
+while true
+do
+
+echo ""
+echo "================================"
+echo " CONFIGURADOR DE RED IPv6"
+echo "================================"
+echo "1) Configurar Router R0"
+echo "2) Configurar Router R1"
+echo "3) Configurar PC0"
+echo "4) Configurar PC1"
+echo "5) Configurar PC2"
+echo "6) Configurar PC3"
+echo "7) Salir"
+echo ""
+
+read -p "Seleccione una opcion: " opc
+
+case $opc in
+
+1. config_R0 ;;
+2. config_R1 ;;
+3. config_PC0 ;;
+4. config_PC1 ;;
+5. config_PC2 ;;
+6. config_PC3 ;;
+7. echo "Saliendo..."; exit 0 ;;
+   *) echo "Opcion invalida";;
+
+esac
+
 done
-
-CONF="! Configuracion autogenerada para R$R_NUM\n"
-if [ "$R_NUM" -eq 0 ]; then
-    CONF+="interface $IF1\n ipv6 address 2000::1/124\nexit\ninterface $IF2\n ipv6 address 2000::29/125\nexit\nipv6 route ::/0 2000::2a\n"
-elif [ "$R_NUM" -eq 1 ]; then
-    CONF+="interface $IF1\n ipv6 address 2000::2a/125\nexit\ninterface $IF2\n ipv6 address 2000::31/125\nexit\nipv6 route 2000::/124 2000::29\nipv6 route ::/0 2000::32\n"
-elif [ "$R_NUM" -eq 2 ]; then
-    if [ -z "$IF3" ]; then die "R2 necesita 3 adaptadores de red."; fi
-    CONF+="interface $IF1\n ipv6 address 2000::32/125\nexit\ninterface $IF2\n ipv6 address 2000::39/125\nexit\ninterface $IF3\n ipv6 address 2000::11/124\nexit\nipv6 route ::/0 2000::31\nipv6 route 2000::20/124 2000::3a\n"
-elif [ "$R_NUM" -eq 3 ]; then
-    CONF+="interface $IF1\n ipv6 address 2000::3a/125\nexit\ninterface $IF2\n ipv6 address 2000::21/124\nexit\nipv6 route ::/0 2000::39\n"
-fi
-
-echo -e "$CONF" > /etc/frr/frr.conf
-chown frr:frr /etc/frr/frr.conf
-
-if [ ! -s /etc/frr/frr.conf ]; then die "El archivo frr.conf no se creo."; fi
-pausa_exito "Archivo de rutas generado"
-
-echo -e "\n\e[36m=== PASO 5: Reinicio de Servicios FRR ===\e[0m"
-systemctl restart frr
-sleep 2
-
-if ! systemctl is-active --quiet frr; then
-    die "FRR fallo al iniciar."
-fi
-
-echo -e "\n\e[1;32m[EXITO TOTAL] El Router R$R_NUM esta configurado y operando.\e[0m"
