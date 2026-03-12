@@ -1,15 +1,28 @@
 #!/bin/bash
 
+if [ "$EUID" -ne 0 ]; then
+echo "Ejecuta con sudo"
+exit
+fi
+
 clear
-echo "CONFIGURADOR FRR"
+echo "CONFIGURADOR FRR LIMPIO"
 
 echo "1) Configurar R0"
 echo "2) Configurar R1"
-read -p "Selecciona router: " op
+echo "3) Salir"
+
+read -p "Seleccione router: " op
+
+systemctl stop frr
+
+ip addr flush dev enp0s3
+ip addr flush dev enp0s8
+ip addr flush dev enp0s9
+
+rm -f /etc/frr/frr.conf
 
 if [ "$op" = "1" ]; then
-
-echo "Configurando R0..."
 
 echo "hostname R0
 service integrated-vtysh-config
@@ -26,12 +39,10 @@ ipv6 rip RIP enable
 ipv6 router rip RIP
 line vty" > /etc/frr/frr.conf
 
-systemctl restart frr
-echo "R0 configurado"
+systemctl start frr
+echo "R0 configurado correctamente"
 
 elif [ "$op" = "2" ]; then
-
-echo "Configurando R1..."
 
 echo "hostname R1
 service integrated-vtysh-config
@@ -48,11 +59,12 @@ ipv6 rip RIP enable
 ipv6 router rip RIP
 line vty" > /etc/frr/frr.conf
 
-systemctl restart frr
-echo "R1 configurado"
+systemctl start frr
+echo "R1 configurado correctamente"
 
 else
 
-echo "Opcion invalida"
+echo "Saliendo"
+exit
 
 fi
