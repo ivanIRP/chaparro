@@ -1,70 +1,120 @@
 #!/bin/bash
 
-if [ "$EUID" -ne 0 ]; then
-echo "Ejecuta con sudo"
-exit
-fi
-
 clear
-echo "CONFIGURADOR FRR LIMPIO"
 
-echo "1) Configurar R0"
-echo "2) Configurar R1"
-echo "3) Salir"
+echo "CONFIGURADOR DE ROUTERS FRR"
+echo "1) R0 RIPng"
+echo "2) R1 RIPng"
+echo "3) R0 EIGRP"
+echo "4) R1 EIGRP"
+echo "5) R0 OSPFv3"
+echo "6) R1 OSPFv3"
+echo ""
 
-read -p "Seleccione router: " op
+read -p "Selecciona una opcion: " opc
 
-systemctl stop frr
+if [ "$opc" == "1" ]; then
 
-ip addr flush dev enp0s3
-ip addr flush dev enp0s8
-ip addr flush dev enp0s9
+sudo systemctl restart frr
 
-rm -f /etc/frr/frr.conf
+sudo vtysh << EOF
+conf t
+router ripng
+network enp0s3
+network enp0s8
+network enp0s9
+exit
+end
+write
+EOF
 
-if [ "$op" = "1" ]; then
+echo "R0 configurado con RIPng"
 
-echo "hostname R0
-service integrated-vtysh-config
-ipv6 forwarding
-interface enp0s3
-ipv6 address 2001:1::1/64
-ipv6 rip RIP enable
-interface enp0s8
-ipv6 address 2001:2::1/64
-ipv6 rip RIP enable
-interface enp0s9
-ipv6 address 2001:3::1/64
-ipv6 rip RIP enable
-ipv6 router rip RIP
-line vty" > /etc/frr/frr.conf
+elif [ "$opc" == "2" ]; then
 
-systemctl start frr
-echo "R0 configurado correctamente"
+sudo systemctl restart frr
 
-elif [ "$op" = "2" ]; then
+sudo vtysh << EOF
+conf t
+router ripng
+network enp0s3
+network enp0s8
+network enp0s9
+exit
+end
+write
+EOF
 
-echo "hostname R1
-service integrated-vtysh-config
-ipv6 forwarding
-interface enp0s3
-ipv6 address 2001:4::1/64
-ipv6 rip RIP enable
-interface enp0s8
-ipv6 address 2001:5::1/64
-ipv6 rip RIP enable
-interface enp0s9
-ipv6 address 2001:3::2/64
-ipv6 rip RIP enable
-ipv6 router rip RIP
-line vty" > /etc/frr/frr.conf
+echo "R1 configurado con RIPng"
 
-systemctl start frr
-echo "R1 configurado correctamente"
+elif [ "$opc" == "3" ]; then
+
+sudo systemctl restart frr
+
+sudo vtysh << EOF
+conf t
+router eigrp 10
+network enp0s3
+network enp0s8
+network enp0s9
+exit
+end
+write
+EOF
+
+echo "R0 configurado con EIGRP"
+
+elif [ "$opc" == "4" ]; then
+
+sudo systemctl restart frr
+
+sudo vtysh << EOF
+conf t
+router eigrp 10
+network enp0s3
+network enp0s8
+network enp0s9
+exit
+end
+write
+EOF
+
+echo "R1 configurado con EIGRP"
+
+elif [ "$opc" == "5" ]; then
+
+sudo systemctl restart frr
+
+sudo vtysh << EOF
+conf t
+router ospf6
+interface enp0s3 area 0
+interface enp0s8 area 0
+interface enp0s9 area 0
+exit
+end
+write
+EOF
+
+echo "R0 configurado con OSPFv3"
+
+elif [ "$opc" == "6" ]; then
+
+sudo systemctl restart frr
+
+sudo vtysh << EOF
+conf t
+router ospf6
+interface enp0s3 area 0
+interface enp0s8 area 0
+interface enp0s9 area 0
+exit
+end
+write
+EOF
+
+echo "R1 configurado con OSPFv3"
 
 else
-
-echo "Saliendo"
-exit
-
+echo "Opcion no valida"
 fi
