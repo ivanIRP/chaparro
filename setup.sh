@@ -3,7 +3,6 @@
 
 # ==========================================
 # 1. DEFINE TUS INTERFACES DE LINUX AQUI
-# Cambia estos nombres con los que te arroje 'ip a'
 # ==========================================
 IF_G0="enp0s3"  # Hacia la PC local
 IF_S0="enp0s8"  # Conexion Izquierda
@@ -13,7 +12,7 @@ IF_S1="enp0s9"  # Conexion Derecha
 # Inicio del Script
 # ==========================================
 if [ "$EUID" -ne 0 ]; then
-  echo "Por favor, ejecuta este script como root (sudo)"
+  echo "Por favor, ejecuta este script como root (sudo o su -)"
   exit 1
 fi
 
@@ -22,9 +21,9 @@ echo "   CONFIGURACION DE ROUTER DEBIAN 12   "
 echo "======================================="
 read -p "Que router vas a configurar? (Ingresa del 0 al 5): " ROUTER_NUM
 
-# Habilitar IP Forwarding
-sysctl -w net.ipv4.ip_forward=1 > /dev/null
-sysctl -w net.ipv6.conf.all.forwarding=1 > /dev/null
+# Habilitar IP Forwarding directo en el sistema de archivos (A prueba de fallos)
+echo 1 > /proc/sys/net/ipv4/ip_forward
+echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
 
 # Instalar FRR si no esta instalado
 if ! command -v vtysh &> /dev/null; then
@@ -205,7 +204,7 @@ EOF
     ;;
 esac
 
-# Reiniciar FRR para aplicar los protocolos
+# Reiniciar FRR para aplicar los protocolos (aqui si se usa systemctl)
 systemctl restart frr
 
 echo "======================================="
