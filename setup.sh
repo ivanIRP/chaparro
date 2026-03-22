@@ -1,5 +1,5 @@
 #!/bin/bash
-# Auto-configurador de Routers Debian 12 (Topologia IPv6 sobre IPv4)
+# Auto-configurador de Routers Debian 12 (Topologia IPv6 sobre IPv4) FINAL
 
 # ==========================================
 # 1. DEFINE TUS INTERFACES DE LINUX AQUI
@@ -21,9 +21,10 @@ echo "   CONFIGURACION DE ROUTER DEBIAN 12   "
 echo "======================================="
 read -p "Que router vas a configurar? (Ingresa del 0 al 5): " ROUTER_NUM
 
-# Habilitar IP Forwarding
+# Habilitar IP Forwarding Global (A prueba de fallos)
 echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
+echo 1 > /proc/sys/net/ipv6/conf/default/forwarding
 
 # Instalar FRR si no esta instalado
 if ! command -v vtysh &> /dev/null; then
@@ -36,7 +37,7 @@ fi
 sed -i 's/ripd=no/ripd=yes/' /etc/frr/daemons
 sed -i 's/ospf6d=no/ospf6d=yes/' /etc/frr/daemons
 
-# Limpiar solo las IPv6 globales y tuneles (dejando intactas las de sistema si las hubiera)
+# Limpiar solo las IPv6 globales y tuneles
 ip -6 addr flush dev $IF_G0 scope global 2>/dev/null
 ip -6 addr flush dev $IF_S0 scope global 2>/dev/null
 ip -6 addr flush dev $IF_S1 scope global 2>/dev/null
@@ -74,6 +75,7 @@ interface $IF_S0
 !
 router ospf6
  ospf6 router-id 1.1.1.1
+ redistribute connected
 !
 EOF
     ;;
@@ -95,6 +97,9 @@ EOF
     ip tunnel add tun0 mode sit remote 192.168.0.10 local 192.168.0.1 ttl 255
     ip link set up dev tun0
     ip -6 addr add 3000::1/64 dev tun0
+    
+    # Forzar forwarding en el tunel
+    echo 1 > /proc/sys/net/ipv6/conf/tun0/forwarding 2>/dev/null
 
     cat <<EOF >> $FRR_CONF
 interface $IF_G0
@@ -114,6 +119,7 @@ router rip
 !
 router ospf6
  ospf6 router-id 1.1.1.2
+ redistribute connected
 !
 EOF
     ;;
@@ -167,6 +173,9 @@ EOF
     ip tunnel add tun0 mode sit remote 192.168.0.1 local 192.168.0.10 ttl 255
     ip link set up dev tun0
     ip -6 addr add 3000::2/64 dev tun0
+    
+    # Forzar forwarding en el tunel
+    echo 1 > /proc/sys/net/ipv6/conf/tun0/forwarding 2>/dev/null
 
     cat <<EOF >> $FRR_CONF
 interface $IF_G0
@@ -186,6 +195,7 @@ router rip
 !
 router ospf6
  ospf6 router-id 1.1.1.3
+ redistribute connected
 !
 EOF
     ;;
@@ -210,6 +220,7 @@ interface $IF_S0
 !
 router ospf6
  ospf6 router-id 1.1.1.4
+ redistribute connected
 !
 EOF
     ;;
@@ -224,6 +235,5 @@ esac
 systemctl restart frr
 
 echo "======================================="
-echo "Configuracion de R$ROUTER_NUM completada."
-echo "Espera 10 segundos y usa 'vtysh' -> 'show ipv6 ospf6 neighbor'"
+echo "Configuracion de R$ROUTER_NUM completada y optimizada."
 echo "======================================="
