@@ -21,7 +21,7 @@ echo "   CONFIGURACION DE ROUTER DEBIAN 12   "
 echo "======================================="
 read -p "Que router vas a configurar? (Ingresa del 0 al 5): " ROUTER_NUM
 
-# Habilitar IP Forwarding directo en el sistema de archivos (A prueba de fallos)
+# Habilitar IP Forwarding
 echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
 
@@ -36,10 +36,12 @@ fi
 sed -i 's/ripd=no/ripd=yes/' /etc/frr/daemons
 sed -i 's/ospf6d=no/ospf6d=yes/' /etc/frr/daemons
 
-# Limpiar interfaces y tuneles previos
-ip addr flush dev $IF_G0 2>/dev/null
-ip addr flush dev $IF_S0 2>/dev/null
-ip addr flush dev $IF_S1 2>/dev/null
+# Limpiar solo las IPv6 globales y tuneles (dejando intactas las de sistema si las hubiera)
+ip -6 addr flush dev $IF_G0 scope global 2>/dev/null
+ip -6 addr flush dev $IF_S0 scope global 2>/dev/null
+ip -6 addr flush dev $IF_S1 scope global 2>/dev/null
+ip -4 addr flush dev $IF_S0 2>/dev/null
+ip -4 addr flush dev $IF_S1 2>/dev/null
 ip tunnel del tun0 2>/dev/null
 
 # Preparar archivo FRR
@@ -59,12 +61,15 @@ case $ROUTER_NUM in
     
     ip link set up dev $IF_S0
     ip -6 addr add 2002::1/64 dev $IF_S0
+    # Forzar Link-Local
+    ip -6 addr add fe80::10/64 dev $IF_S0 scope link
 
     cat <<EOF >> $FRR_CONF
 interface $IF_G0
  ipv6 ospf6 area 0
 !
 interface $IF_S0
+ ipv6 ospf6 network point-to-point
  ipv6 ospf6 area 0
 !
 router ospf6
@@ -80,11 +85,13 @@ EOF
     
     ip link set up dev $IF_S0
     ip -6 addr add 2002::2/64 dev $IF_S0
+    # Forzar Link-Local
+    ip -6 addr add fe80::11/64 dev $IF_S0 scope link
     
     ip link set up dev $IF_S1
     ip addr add 192.168.0.1/30 dev $IF_S1
     
-    # Crear Tunel IPv6 sobre IPv4 (sit)
+    # Crear Tunel
     ip tunnel add tun0 mode sit remote 192.168.0.10 local 192.168.0.1 ttl 255
     ip link set up dev tun0
     ip -6 addr add 3000::1/64 dev tun0
@@ -94,9 +101,11 @@ interface $IF_G0
  ipv6 ospf6 area 0
 !
 interface $IF_S0
+ ipv6 ospf6 network point-to-point
  ipv6 ospf6 area 0
 !
 interface tun0
+ ipv6 ospf6 network point-to-point
  ipv6 ospf6 area 0
 !
 router rip
@@ -151,8 +160,10 @@ EOF
     
     ip link set up dev $IF_S1
     ip -6 addr add 2005::1/64 dev $IF_S1
+    # Forzar Link-Local
+    ip -6 addr add fe80::14/64 dev $IF_S1 scope link
     
-    # Crear Tunel IPv6 sobre IPv4 (sit)
+    # Crear Tunel
     ip tunnel add tun0 mode sit remote 192.168.0.1 local 192.168.0.10 ttl 255
     ip link set up dev tun0
     ip -6 addr add 3000::2/64 dev tun0
@@ -162,9 +173,11 @@ interface $IF_G0
  ipv6 ospf6 area 0
 !
 interface $IF_S1
+ ipv6 ospf6 network point-to-point
  ipv6 ospf6 area 0
 !
 interface tun0
+ ipv6 ospf6 network point-to-point
  ipv6 ospf6 area 0
 !
 router rip
@@ -184,12 +197,15 @@ EOF
     
     ip link set up dev $IF_S0
     ip -6 addr add 2005::2/64 dev $IF_S0
+    # Forzar Link-Local
+    ip -6 addr add fe80::15/64 dev $IF_S0 scope link
 
     cat <<EOF >> $FRR_CONF
 interface $IF_G0
  ipv6 ospf6 area 0
 !
 interface $IF_S0
+ ipv6 ospf6 network point-to-point
  ipv6 ospf6 area 0
 !
 router ospf6
@@ -204,10 +220,10 @@ EOF
     ;;
 esac
 
-# Reiniciar FRR para aplicar los protocolos (aqui si se usa systemctl)
+# Reiniciar FRR
 systemctl restart frr
 
 echo "======================================="
 echo "Configuracion de R$ROUTER_NUM completada."
-echo "Puedes verificar FRR usando el comando: vtysh"
+echo "Espera 10 segundos y usa 'vtysh' -> 'show ipv6 ospf6 neighbor'"
 echo "======================================="
