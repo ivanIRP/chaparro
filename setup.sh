@@ -1,274 +1,140 @@
 #!/bin/bash
-# Auto-configurador de Routers Debian 12 (Topologia IPv6 sobre IPv4) v3
 
-# ==========================================
-# 1. DEFINE TUS INTERFACES DE LINUX AQUI
-# ==========================================
-IF_G0="enp0s3"  # Hacia la PC local
-IF_S0="enp0s8"  # Conexion Izquierda
-IF_S1="enp0s9"  # Conexion Derecha
+echo "=============================="
+echo " CONFIGURADOR AUTOMATICO FRR "
+echo "=============================="
+echo "Selecciona router (0 - 11): "
+read R
 
-# ==========================================
-# Inicio del Script
-# ==========================================
-if [ "$EUID" -ne 0 ]; then
-  echo "Por favor, ejecuta este script como root (sudo o su -)"
-  exit 1
-fi
+# Habilitar IPv6 forwarding
+sysctl -w net.ipv6.conf.all.forwarding=1
 
-echo "======================================="
-echo "   CONFIGURACION DE ROUTER DEBIAN 12   "
-echo "======================================="
-read -p "Que router vas a configurar? (Ingresa del 0 al 5): " ROUTER_NUM
+# Instalar FRR si no está
+apt update -y
+apt install frr -y
 
-# ==========================================
-# HABILITAR FORWARDING EN KERNEL
-# ==========================================
-echo 1 > /proc/sys/net/ipv4/ip_forward
-echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
-echo 1 > /proc/sys/net/ipv6/conf/default/forwarding
+# Habilitar OSPFv3
+sed -i 's/ospf6d=no/ospf6d=yes/g' /etc/frr/daemons
 
-# Hacer el forwarding persistente en reinicios
-cat <<EOF > /etc/sysctl.d/99-forwarding.conf
-net.ipv4.ip_forward = 1
-net.ipv6.conf.all.forwarding = 1
-net.ipv6.conf.default.forwarding = 1
-EOF
-sysctl -p /etc/sysctl.d/99-forwarding.conf > /dev/null 2>&1
+# Variables
+RID="1.1.1.$((R+1))"
 
-# ==========================================
-# INSTALAR FRR SI NO ESTA
-# ==========================================
-if ! command -v vtysh &> /dev/null; then
-    echo "Instalando FRRouting (FRR)..."
-    apt-get update
-    apt-get install -y frr
-fi
+# Configuración por router
+case $R in
 
-# Habilitar RIP y OSPF6 en FRR
-sed -i 's/ripd=no/ripd=yes/' /etc/frr/daemons
-sed -i 's/ospf6d=no/ospf6d=yes/' /etc/frr/daemons
+0)
+LAN="2000::1/118"
+S1="2000::1:1/125"
+;;
 
-# ==========================================
-# LIMPIAR CONFIGURACION PREVIA
-# ==========================================
-ip -6 addr flush dev $IF_G0 scope global 2>/dev/null
-ip -6 addr flush dev $IF_S0 scope global 2>/dev/null
-ip -6 addr flush dev $IF_S1 scope global 2>/dev/null
-ip -4 addr flush dev $IF_S0 2>/dev/null
-ip -4 addr flush dev $IF_S1 2>/dev/null
-ip tunnel del tun0 2>/dev/null
+1)
+LAN="2000::1001/118"
+S1="2000::1:2/125"
+S2="2000::2:1/125"
+;;
 
-# ==========================================
-# ARCHIVO FRR
-# CORRECCION CRITICA: NO incluir "no ipv6 forwarding"
-# Esa linea deshabilita el reenvio IPv6 en FRR aunque el kernel
-# lo tenga activo, bloqueando todo el trafico entre redes IPv6
-# ==========================================
-FRR_CONF="/etc/frr/frr.conf"
-cat <<EOF > $FRR_CONF
-frr defaults traditional
-hostname R$ROUTER_NUM
-!
-EOF
+2)
+LAN="2000::2001/118"
+S1="2000::2:2/125"
+S2="2000::3:1/126"
+;;
 
-case $ROUTER_NUM in
-  0)
-    echo "Configurando R0 (Extremo IPv6 - lado izquierdo)..."
-    # Red LAN: 2000::/64  |  Enlace a R1: 2002::/64
-    ip link set up dev $IF_G0
-    ip -6 addr add 2000::1/64 dev $IF_G0
+3)
+S1="2000::3:2/126"
+S2="2000::4:1/126"
+S3="2000::8:1/125"
+;;
 
-    ip link set up dev $IF_S0
-    ip -6 addr add 2002::1/64 dev $IF_S0
-    ip -6 addr add fe80::10/64 dev $IF_S0 scope link
+4)
+LAN="2000::3001/118"
+S1="2000::4:2/126"
+S2="2000::5:1/125"
+;;
 
-    cat <<EOF >> $FRR_CONF
-interface $IF_G0
- ipv6 ospf6 area 0
-!
-interface $IF_S0
- ipv6 ospf6 network point-to-point
- ipv6 ospf6 area 0
-!
-router ospf6
- ospf6 router-id 1.1.1.1
- redistribute connected
-!
-EOF
-    ;;
+5)
+LAN="2000::4001/118"
+S1="2000::5:2/125"
+S2="2000::6:1/126"
+;;
 
-  1)
-    echo "Configurando R1 (Inicio del Tunel)..."
-    # LAN: 2001::/64  |  Enlace IPv6 a R0: 2002::/64
-    # Enlace IPv4 a R2: 192.168.0.0/30 -> R1=.1
-    # Tunel SIT: 3000::/64, R1=3000::1 <-> R4=3000::2
-    ip link set up dev $IF_G0
-    ip -6 addr add 2001::1/64 dev $IF_G0
+6)
+LAN="2000::5001/118"
+S1="2000::6:2/126"
+S2="2000::7:1/126"
+;;
 
-    ip link set up dev $IF_S0
-    ip -6 addr add 2002::2/64 dev $IF_S0
-    ip -6 addr add fe80::11/64 dev $IF_S0 scope link
+7)
+LAN="2000::6001/118"
+S1="2000::7:2/126"
+;;
 
-    ip link set up dev $IF_S1
-    ip addr add 192.168.0.1/30 dev $IF_S1
+8)
+LAN="2000::7001/118"
+S1="2000::8:2/125"
+S2="2000::9:1/125"
+;;
 
-    # Ruta estatica para que el tunel pueda alcanzar R4
-    # antes de que RIP converja completamente
-    ip route add 192.168.0.8/30 via 192.168.0.2 2>/dev/null || true
+9)
+LAN="2000::8001/118"
+S1="2000::9:2/125"
+S2="2000::10:1/125"
+;;
 
-    # Crear Tunel SIT (IPv6 encapsulado en IPv4)
-    ip tunnel add tun0 mode sit remote 192.168.0.10 local 192.168.0.1 ttl 255
-    ip link set up dev tun0
-    ip -6 addr add 3000::1/64 dev tun0
-    echo 1 > /proc/sys/net/ipv6/conf/tun0/forwarding 2>/dev/null
+10)
+LAN="2000::9001/118"
+S1="2000::10:2/125"
+S2="2000::11:1/125"
+;;
 
-    cat <<EOF >> $FRR_CONF
-interface $IF_G0
- ipv6 ospf6 area 0
-!
-interface $IF_S0
- ipv6 ospf6 network point-to-point
- ipv6 ospf6 area 0
-!
-interface tun0
- ipv6 ospf6 network point-to-point
- ipv6 ospf6 area 0
-!
-router rip
- version 2
- network 192.168.0.0/24
-!
-router ospf6
- ospf6 router-id 1.1.1.2
- redistribute connected
-!
-EOF
-    ;;
+11)
+LAN="2000::A001/118"
+S1="2000::11:2/125"
+;;
 
-  2)
-    echo "Configurando R2 (Transito IPv4)..."
-    # Segmento R1-R2: 192.168.0.0/30  -> R2=.2
-    # Segmento R2-R3: 192.168.0.4/30  -> R2=.5
-    ip link set up dev $IF_S0
-    ip addr add 192.168.0.2/30 dev $IF_S0
+*)
+echo "Router inválido"
+exit
+;;
 
-    ip link set up dev $IF_S1
-    ip addr add 192.168.0.5/30 dev $IF_S1
-
-    cat <<EOF >> $FRR_CONF
-router rip
- version 2
- network 192.168.0.0/24
-!
-EOF
-    ;;
-
-  3)
-    echo "Configurando R3 (Transito IPv4)..."
-    # Segmento R2-R3: 192.168.0.4/30  -> R3=.6
-    # Segmento R3-R4: 192.168.0.8/30  -> R3=.9
-    ip link set up dev $IF_S0
-    ip addr add 192.168.0.6/30 dev $IF_S0
-
-    ip link set up dev $IF_S1
-    ip addr add 192.168.0.9/30 dev $IF_S1
-
-    cat <<EOF >> $FRR_CONF
-router rip
- version 2
- network 192.168.0.0/24
-!
-EOF
-    ;;
-
-  4)
-    echo "Configurando R4 (Fin del Tunel)..."
-    # LAN: 2003::/64  |  Enlace IPv4 a R3: 192.168.0.8/30 -> R4=.10
-    # Enlace IPv6 a R5: 2005::/64  |  Tunel SIT: 3000::2
-    ip link set up dev $IF_G0
-    ip -6 addr add 2003::1/64 dev $IF_G0
-
-    ip link set up dev $IF_S0
-    ip addr add 192.168.0.10/30 dev $IF_S0
-
-    ip link set up dev $IF_S1
-    ip -6 addr add 2005::1/64 dev $IF_S1
-    ip -6 addr add fe80::14/64 dev $IF_S1 scope link
-
-    # Ruta estatica para que el tunel pueda alcanzar R1
-    # antes de que RIP converja completamente
-    ip route add 192.168.0.0/30 via 192.168.0.9 2>/dev/null || true
-
-    # Crear Tunel SIT (IPv6 encapsulado en IPv4)
-    ip tunnel add tun0 mode sit remote 192.168.0.1 local 192.168.0.10 ttl 255
-    ip link set up dev tun0
-    ip -6 addr add 3000::2/64 dev tun0
-    echo 1 > /proc/sys/net/ipv6/conf/tun0/forwarding 2>/dev/null
-
-    cat <<EOF >> $FRR_CONF
-interface $IF_G0
- ipv6 ospf6 area 0
-!
-interface $IF_S1
- ipv6 ospf6 network point-to-point
- ipv6 ospf6 area 0
-!
-interface tun0
- ipv6 ospf6 network point-to-point
- ipv6 ospf6 area 0
-!
-router rip
- version 2
- network 192.168.0.0/24
-!
-router ospf6
- ospf6 router-id 1.1.1.3
- redistribute connected
-!
-EOF
-    ;;
-
-  5)
-    echo "Configurando R5 (Extremo IPv6 - lado derecho)..."
-    # LAN: 2004::/64  |  Enlace a R4: 2005::/64
-    ip link set up dev $IF_G0
-    ip -6 addr add 2004::1/64 dev $IF_G0
-
-    ip link set up dev $IF_S0
-    ip -6 addr add 2005::2/64 dev $IF_S0
-    ip -6 addr add fe80::15/64 dev $IF_S0 scope link
-
-    cat <<EOF >> $FRR_CONF
-interface $IF_G0
- ipv6 ospf6 area 0
-!
-interface $IF_S0
- ipv6 ospf6 network point-to-point
- ipv6 ospf6 area 0
-!
-router ospf6
- ospf6 router-id 1.1.1.4
- redistribute connected
-!
-EOF
-    ;;
-
-  *)
-    echo "Error: Numero no valido. Debe ser del 0 al 5."
-    exit 1
-    ;;
 esac
 
-# Reiniciar FRR
+# Configurar interfaces (asumiendo nombres estándar)
+ip link set eth0 up
+ip link set eth1 up
+ip link set eth2 up
+
+# Limpiar IPs
+ip -6 addr flush dev eth0
+ip -6 addr flush dev eth1
+ip -6 addr flush dev eth2
+
+# Asignar direcciones
+[ ! -z "$LAN" ] && ip -6 addr add $LAN dev eth0
+[ ! -z "$S1" ] && ip -6 addr add $S1 dev eth1
+[ ! -z "$S2" ] && ip -6 addr add $S2 dev eth2
+
+# Crear configuración FRR
+cat > /etc/frr/frr.conf <<EOF
+frr version 8.4.4
+frr defaults traditional
+hostname R$R
+log syslog informational
+
+router ospf6
+ router-id $RID
+
+ interface eth0 area 0.0.0.0
+ interface eth1 area 0.0.0.0
+ interface eth2 area 0.0.0.0
+EOF
+
+# Permisos
+chown frr:frr /etc/frr/frr.conf
+
+# Reiniciar servicio
 systemctl restart frr
 
-echo "======================================="
-echo "Configuracion de R$ROUTER_NUM completada."
-echo "======================================="
-echo ""
-echo "IMPORTANTE: Espera 30-60 segundos para que OSPF6 y RIP converjan."
-echo "Verifica con:"
-echo "  vtysh -c 'show ipv6 ospf6 neighbor'"
-echo "  vtysh -c 'show ipv6 route'"
-echo "  vtysh -c 'show ip rip'"
+echo "=============================="
+echo " Router R$R configurado"
+echo " Router-ID: $RID"
+echo "=============================="
