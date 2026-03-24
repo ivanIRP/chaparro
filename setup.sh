@@ -21,13 +21,14 @@ ip link set enp0s3 up 2>/dev/null
 ip link set enp0s8 up 2>/dev/null
 ip link set enp0s9 up 2>/dev/null
 
-# Variables
 LAN=""
 LEFT=""
 RIGHT=""
+EXTRA=""
 
 case $R in
 
+# 🔴 R0 (EXCEPCIÓN)
 0)
 LAN="2000::1/118"
 RIGHT="2000::1:1/125"
@@ -45,6 +46,7 @@ LEFT="2000::2:2/125"
 RIGHT="2000::3:1/126"
 ;;
 
+# 🔴 R3 (SIN PC, 3 enlaces)
 3)
 LEFT="2000::3:2/126"
 RIGHT="2000::4:1/126"
@@ -104,12 +106,18 @@ exit
 
 esac
 
-# Asignar IPs
+# Asignar IPs correctamente
+
+# LAN
 [ ! -z "$LAN" ] && ip -6 addr add $LAN dev enp0s3
+
+# IZQUIERDA → enp0s8
 [ ! -z "$LEFT" ] && ip -6 addr add $LEFT dev enp0s8
+
+# DERECHA → enp0s9
 [ ! -z "$RIGHT" ] && ip -6 addr add $RIGHT dev enp0s9
 
-# Caso especial R3 (tercer enlace)
+# EXTRA (solo R3 usa enp0s3 como enlace adicional)
 if [ "$R" == "3" ]; then
     ip -6 addr add $EXTRA dev enp0s3
 fi
