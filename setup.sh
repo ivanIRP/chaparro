@@ -1,18 +1,15 @@
 #!/bin/bash
-# Auto-configurador de Routers Debian 12 (Topologia IPv6 sobre IPv4) FINAL
+# Auto-configurador de Routers Debian 12 - FIX CABLES CRUZADOS
 
 # ==========================================
-# 1. DEFINE TUS INTERFACES DE LINUX AQUI
+# TU CABLEADO FÍSICO (VIRTUALBOX)
 # ==========================================
-IF_G0="enp0s3"  # Hacia la PC local
-IF_S0="enp0s8"  # Conexion Izquierda
-IF_S1="enp0s9"  # Conexion Derecha
+IF_PC="enp0s3"   # Hacia la PC (Abajo)
+IF_IZQ="enp0s9"  # Hacia el router de la Izquierda
+IF_DER="enp0s8"  # Hacia el router de la Derecha
 
-# ==========================================
-# Inicio del Script
-# ==========================================
 if [ "$EUID" -ne 0 ]; then
-  echo "Por favor, ejecuta este script como root (sudo o su -)"
+  echo "Por favor, ejecuta este script como root (sudo)"
   exit 1
 fi
 
@@ -21,31 +18,19 @@ echo "   CONFIGURACION DE ROUTER DEBIAN 12   "
 echo "======================================="
 read -p "Que router vas a configurar? (Ingresa del 0 al 5): " ROUTER_NUM
 
-# Habilitar IP Forwarding Global (A prueba de fallos)
+# Habilitar IP Forwarding
 echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
 echo 1 > /proc/sys/net/ipv6/conf/default/forwarding
 
-# Instalar FRR si no esta instalado
-if ! command -v vtysh &> /dev/null; then
-    echo "Instalando FRRouting (FRR)..."
-    apt-get update
-    apt-get install -y frr
-fi
-
-# Habilitar RIP y OSPF6 en FRR
-sed -i 's/ripd=no/ripd=yes/' /etc/frr/daemons
-sed -i 's/ospf6d=no/ospf6d=yes/' /etc/frr/daemons
-
-# Limpiar solo las IPv6 globales y tuneles
-ip -6 addr flush dev $IF_G0 scope global 2>/dev/null
-ip -6 addr flush dev $IF_S0 scope global 2>/dev/null
-ip -6 addr flush dev $IF_S1 scope global 2>/dev/null
-ip -4 addr flush dev $IF_S0 2>/dev/null
-ip -4 addr flush dev $IF_S1 2>/dev/null
+# Limpiar interfaces (Borrón y cuenta nueva)
+ip -6 addr flush dev $IF_PC scope global 2>/dev/null
+ip -6 addr flush dev $IF_IZQ scope global 2>/dev/null
+ip -6 addr flush dev $IF_DER scope global 2>/dev/null
+ip -4 addr flush dev $IF_IZQ 2>/dev/null
+ip -4 addr flush dev $IF_DER 2>/dev/null
 ip tunnel del tun0 2>/dev/null
 
-# Preparar archivo FRR
 FRR_CONF="/etc/frr/frr.conf"
 cat <<EOF > $FRR_CONF
 frr defaults traditional
@@ -56,20 +41,19 @@ EOF
 
 case $ROUTER_NUM in
   0)
-    echo "Configurando R0 (Extremo IPv6)..."
-    ip link set up dev $IF_G0
-    ip -6 addr add 2000::1/64 dev $IF_G0
+    echo "Configurando R0 (Solo conecta a la Derecha)..."
+    ip link set up dev $IF_PC
+    ip -6 addr add 2000::1/64 dev $IF_PC
     
-    ip link set up dev $IF_S0
-    ip -6 addr add 2002::1/64 dev $IF_S0
-    # Forzar Link-Local
-    ip -6 addr add fe80::10/64 dev $IF_S0 scope link
+    ip link set up dev $IF_DER
+    ip -6 addr add 2002::1/64 dev $IF_DER
+    ip -6 addr add fe80::10/64 dev $IF_DER scope link
 
     cat <<EOF >> $FRR_CONF
-interface $IF_G0
+interface $IF_PC
  ipv6 ospf6 area 0
 !
-interface $IF_S0
+interface $IF_DER
  ipv6 ospf6 network point-to-point
  ipv6 ospf6 area 0
 !
@@ -81,31 +65,31 @@ EOF
     ;;
     
   1)
-    echo "Configurando R1 (Inicio del Tunel)..."
-    ip link set up dev $IF_G0
-    ip -6 addr add 2001::1/64 dev $IF_G0
+    echo "Configurando R1 (Izquierda IPv6, Derecha IPv4)..."
+    ip link set up dev $IF_PC
+    ip -6 addr add 2001::1/64 dev $IF_PC
     
-    ip link set up dev $IF_S0
-    ip -6 addr add 2002::2/64 dev $IF_S0
-    # Forzar Link-Local
-    ip -6 addr add fe80::11/64 dev $IF_S0 scope link
+    # Izquierda hacia R0 (IPv6)
+    ip link set up dev $IF_IZQ
+    ip -6 addr add 2002::2/64 dev $IF_IZQ
+    ip -6 addr add fe80::11/64 dev $IF_IZQ scope link
     
-    ip link set up dev $IF_S1
-    ip addr add 192.168.0.1/30 dev $IF_S1
+    # Derecha hacia R2 (IPv4)
+    ip link set up dev $IF_DER
+    ip addr add 192.168.0.1/30 dev $IF_DER
     
-    # Crear Tunel
+    # Tunel
     ip tunnel add tun0 mode sit remote 192.168.0.10 local 192.168.0.1 ttl 255
     ip link set up dev tun0
     ip -6 addr add 3000::1/64 dev tun0
-    
-    # Forzar forwarding en el tunel
+    ip -6 addr add fe80::1/64 dev tun0 scope link
     echo 1 > /proc/sys/net/ipv6/conf/tun0/forwarding 2>/dev/null
 
     cat <<EOF >> $FRR_CONF
-interface $IF_G0
+interface $IF_PC
  ipv6 ospf6 area 0
 !
-interface $IF_S0
+interface $IF_IZQ
  ipv6 ospf6 network point-to-point
  ipv6 ospf6 area 0
 !
@@ -125,12 +109,12 @@ EOF
     ;;
     
   2)
-    echo "Configurando R2 (Transito IPv4)..."
-    ip link set up dev $IF_S0
-    ip addr add 192.168.0.2/30 dev $IF_S0
+    echo "Configurando R2 (Izquierda y Derecha IPv4)..."
+    ip link set up dev $IF_IZQ
+    ip addr add 192.168.0.2/30 dev $IF_IZQ
     
-    ip link set up dev $IF_S1
-    ip addr add 192.168.0.5/30 dev $IF_S1
+    ip link set up dev $IF_DER
+    ip addr add 192.168.0.5/30 dev $IF_DER
 
     cat <<EOF >> $FRR_CONF
 router rip
@@ -141,12 +125,12 @@ EOF
     ;;
     
   3)
-    echo "Configurando R3 (Transito IPv4)..."
-    ip link set up dev $IF_S0
-    ip addr add 192.168.0.6/30 dev $IF_S0
+    echo "Configurando R3 (Izquierda y Derecha IPv4)..."
+    ip link set up dev $IF_IZQ
+    ip addr add 192.168.0.6/30 dev $IF_IZQ
     
-    ip link set up dev $IF_S1
-    ip addr add 192.168.0.9/30 dev $IF_S1
+    ip link set up dev $IF_DER
+    ip addr add 192.168.0.9/30 dev $IF_DER
 
     cat <<EOF >> $FRR_CONF
 router rip
@@ -157,31 +141,31 @@ EOF
     ;;
     
   4)
-    echo "Configurando R4 (Fin del Tunel)..."
-    ip link set up dev $IF_G0
-    ip -6 addr add 2003::1/64 dev $IF_G0
+    echo "Configurando R4 (Izquierda IPv4, Derecha IPv6)..."
+    ip link set up dev $IF_PC
+    ip -6 addr add 2003::1/64 dev $IF_PC
     
-    ip link set up dev $IF_S0
-    ip addr add 192.168.0.10/30 dev $IF_S0
+    # Izquierda hacia R3 (IPv4)
+    ip link set up dev $IF_IZQ
+    ip addr add 192.168.0.10/30 dev $IF_IZQ
     
-    ip link set up dev $IF_S1
-    ip -6 addr add 2005::1/64 dev $IF_S1
-    # Forzar Link-Local
-    ip -6 addr add fe80::14/64 dev $IF_S1 scope link
+    # Derecha hacia R5 (IPv6)
+    ip link set up dev $IF_DER
+    ip -6 addr add 2005::1/64 dev $IF_DER
+    ip -6 addr add fe80::14/64 dev $IF_DER scope link
     
-    # Crear Tunel
+    # Tunel
     ip tunnel add tun0 mode sit remote 192.168.0.1 local 192.168.0.10 ttl 255
     ip link set up dev tun0
     ip -6 addr add 3000::2/64 dev tun0
-    
-    # Forzar forwarding en el tunel
+    ip -6 addr add fe80::4/64 dev tun0 scope link
     echo 1 > /proc/sys/net/ipv6/conf/tun0/forwarding 2>/dev/null
 
     cat <<EOF >> $FRR_CONF
-interface $IF_G0
+interface $IF_PC
  ipv6 ospf6 area 0
 !
-interface $IF_S1
+interface $IF_DER
  ipv6 ospf6 network point-to-point
  ipv6 ospf6 area 0
 !
@@ -201,20 +185,19 @@ EOF
     ;;
     
   5)
-    echo "Configurando R5 (Extremo IPv6)..."
-    ip link set up dev $IF_G0
-    ip -6 addr add 2004::1/64 dev $IF_G0
+    echo "Configurando R5 (Solo conecta a la Izquierda)..."
+    ip link set up dev $IF_PC
+    ip -6 addr add 2004::1/64 dev $IF_PC
     
-    ip link set up dev $IF_S0
-    ip -6 addr add 2005::2/64 dev $IF_S0
-    # Forzar Link-Local
-    ip -6 addr add fe80::15/64 dev $IF_S0 scope link
+    ip link set up dev $IF_IZQ
+    ip -6 addr add 2005::2/64 dev $IF_IZQ
+    ip -6 addr add fe80::15/64 dev $IF_IZQ scope link
 
     cat <<EOF >> $FRR_CONF
-interface $IF_G0
+interface $IF_PC
  ipv6 ospf6 area 0
 !
-interface $IF_S0
+interface $IF_IZQ
  ipv6 ospf6 network point-to-point
  ipv6 ospf6 area 0
 !
@@ -224,16 +207,7 @@ router ospf6
 !
 EOF
     ;;
-    
-  *)
-    echo "Error: Numero no valido. Debe ser del 0 al 5."
-    exit 1
-    ;;
 esac
 
-# Reiniciar FRR
 systemctl restart frr
-
-echo "======================================="
-echo "Configuracion de R$ROUTER_NUM completada y optimizada."
-echo "======================================="
+echo "Configuracion de R$ROUTER_NUM completada con los cables corregidos."
