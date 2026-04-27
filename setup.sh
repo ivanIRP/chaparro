@@ -1,9 +1,9 @@
 #!/bin/bash
 # ==============================================================================
-# SCRIPT MONOLÍTICO V4 - CONFIGURACIÓN PURA Y RUTAS BLINDADAS
+# SCRIPT MONOLÍTICO V5 - CONFIGURACIÓN PURA + PARCHE OSPF VIRTUALBOX
 # ==============================================================================
 
-# Forzar la carga de rutas de administrador (Soluciona el error de iptables)
+# Forzar la carga de rutas de administrador
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 if [[ $EUID -ne 0 ]]; then echo "ERROR: Ejecuta con sudo"; exit 1; fi
@@ -20,7 +20,7 @@ fi
 
 MOD=$((ID % 6))
 GRP=$((ID / 6))
-ESCENARIOS=("Estático (R0-R5)" "OSPF (R6-R11)" "ACLs+Firewall (R12-R17)" "RIP/RIPng (R18-R23)")
+ESCENARIOS=("Estático (R0-R5)" "OSPF Híbrido (R6-R11)" "ACLs+Firewall (R12-R17)" "RIP/RIPng (R18-R23)")
 
 echo "======================================================="
 echo "[*] Preparando R$ID | ${ESCENARIOS[$GRP]} | Pos: $MOD"
@@ -100,7 +100,7 @@ case $MOD in
         ;;
 esac
 
-# 4. Lógica de Enrutamiento Dinámica por Bloque (Se usa 'end' en lugar de 'exit' para asegurar el 'write')
+# 4. Lógica de Enrutamiento Dinámica por Bloque
 echo "[*] Inyectando Protocolos de FRR..."
 if [[ $GRP -eq 0 || $GRP -eq 2 ]]; then
     # ESTÁTICAS Y ACLs
@@ -114,14 +114,14 @@ if [[ $GRP -eq 0 || $GRP -eq 2 ]]; then
     esac
 
 elif [[ $GRP -eq 1 ]]; then
-    # OSPF
+    # OSPF HÍBRIDO (El parche para vencer a VirtualBox va incluido aquí)
     RID="0.0.0.$ID"
     case $MOD in
-        0) $VTY -c "conf t" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface tunR1" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "end" -c "write" ;;
-        1) $VTY -c "conf t" -c "router ospf" -c "network 8.0.0.0/24 area 0" -c "network 10.255.255.0/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s8" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface tunR0" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "end" -c "write" ;;
-        2) $VTY -c "conf t" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface enp0s8" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface enp0s9" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "end" -c "write" ;;
-        3) $VTY -c "conf t" -c "router ospf" -c "network 9.0.0.0/24 area 0" -c "network 10.255.255.0/30 area 0" -c "network 200.0.0.4/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "end" -c "write" ;;
-        4) $VTY -c "conf t" -c "router ospf" -c "network 200.0.0.4/30 area 0" -c "network 200.0.0.8/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s9" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface tunR3" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "end" -c "write" ;;
+        0) $VTY -c "conf t" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface tunR1" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "end" -c "write" ;;
+        1) $VTY -c "conf t" -c "router ospf" -c "network 8.0.0.0/24 area 0" -c "network 10.255.255.0/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s8" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "interface tunR0" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "interface tunR3" -c "ip ospf network point-to-point" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "exit" -c "ipv6 route 2000::20/125 2000::1a" -c "ipv6 route 2000::10/125 2000::1a" -c "end" -c "write" ;;
+        2) $VTY -c "conf t" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "interface enp0s8" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "interface enp0s9" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "exit" -c "ipv6 route 2000::/125 2000::19" -c "ipv6 route 2000::10/125 2000::22" -c "end" -c "write" ;;
+        3) $VTY -c "conf t" -c "router ospf" -c "network 9.0.0.0/24 area 0" -c "network 10.255.255.0/30 area 0" -c "network 200.0.0.4/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "interface tunR4" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "interface tunR1" -c "ip ospf network point-to-point" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "exit" -c "ipv6 route 2000::18/125 2000::21" -c "ipv6 route 2000::/125 2000::21" -c "end" -c "write" ;;
+        4) $VTY -c "conf t" -c "router ospf" -c "network 200.0.0.4/30 area 0" -c "network 200.0.0.8/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s9" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface tunR3" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "end" -c "write" ;;
         5) $VTY -c "conf t" -c "router ospf" -c "network 200.0.0.8/30 area 0" -c "network 11.0.0.0/24 area 0" -c "redistribute connected" -c "end" -c "write" ;;
     esac
 
