@@ -1,7 +1,10 @@
 #!/bin/bash
 # ==============================================================================
-# SCRIPT MONOLÍTICO V2 - (24 ROUTERS - 4 ESCENARIOS)
+# SCRIPT MONOLÍTICO V4 - CONFIGURACIÓN PURA Y RUTAS BLINDADAS
 # ==============================================================================
+
+# Forzar la carga de rutas de administrador (Soluciona el error de iptables)
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 if [[ $EUID -ne 0 ]]; then echo "ERROR: Ejecuta con sudo"; exit 1; fi
 
@@ -23,8 +26,8 @@ echo "======================================================="
 echo "[*] Preparando R$ID | ${ESCENARIOS[$GRP]} | Pos: $MOD"
 echo "======================================================="
 
-# 1. Destrucción de la memoria residual (Mata el error !H)
-echo "[*] Limpiando fantasmas de red y FRR..."
+# 1. Destrucción de la memoria residual (Mata rutas fantasma)
+echo "[*] Limpiando red y reiniciando FRR..."
 systemctl stop frr
 rm -f /etc/frr/frr.conf
 cat <<EOF > /etc/frr/frr.conf
@@ -57,7 +60,7 @@ fi
 systemctl start frr
 sleep 2
 
-# 3. Asignación IP y Túneles (Capa Física)
+# 3. Asignación IP y Túneles (Capa Física compartida)
 case $MOD in
     0) 
         $IP addr add 2000::2/125 dev enp0s3; $IP addr add 200.0.0.1/30 dev enp0s8
@@ -97,50 +100,46 @@ case $MOD in
         ;;
 esac
 
-# 4. Lógica de Enrutamiento
+# 4. Lógica de Enrutamiento Dinámica por Bloque (Se usa 'end' en lugar de 'exit' para asegurar el 'write')
 echo "[*] Inyectando Protocolos de FRR..."
 if [[ $GRP -eq 0 || $GRP -eq 2 ]]; then
     # ESTÁTICAS Y ACLs
     case $MOD in
-        0) $VTY -c "conf t" -c "ipv6 route 2000::/110 fd00:a::2" -c "exit" -c "write" ;;
-        1) $VTY -c "conf t" -c "ipv6 route 2000::/125 fd00:a::1" -c "ipv6 route 2000::8/125 2000::1a" -c "ipv6 route 2000::10/125 2000::1a" -c "ipv6 route 2000::20/125 2000::1a" -c "ip route 9.0.0.0/24 10.255.255.2" -c "ip route 11.0.0.0/24 10.255.255.2" -c "ip route 200.0.0.4/30 10.255.255.2" -c "ip route 200.0.0.8/30 10.255.255.2" -c "exit" -c "write" ;;
-        2) $VTY -c "conf t" -c "ipv6 route 2000::/125 2000::19" -c "ipv6 route 2000::10/125 2000::22" -c "exit" -c "write" ;;
-        3) $VTY -c "conf t" -c "ip route 8.0.0.0/24 10.255.255.1" -c "ip route 200.0.0.0/30 10.255.255.1" -c "ip route 11.0.0.0/24 200.0.0.6" -c "ipv6 route 2000::18/125 2000::21" -c "ipv6 route 2000::/125 2000::21" -c "ipv6 route 2000::8/125 2000::21" -c "ipv6 route 2000::10/125 fd00:b::2" -c "exit" -c "write" ;;
-        4) $VTY -c "conf t" -c "ip route 8.0.0.0/24 200.0.0.5" -c "ip route 9.0.0.0/24 200.0.0.5" -c "ip route 11.0.0.0/24 200.0.0.10" -c "ipv6 route 2000::/110 fd00:b::1" -c "exit" -c "write" ;;
-        5) $VTY -c "conf t" -c "ip route 0.0.0.0/0 200.0.0.9" -c "exit" -c "write" ;;
+        0) $VTY -c "conf t" -c "ipv6 route 2000::/110 fd00:a::2" -c "end" -c "write" ;;
+        1) $VTY -c "conf t" -c "ipv6 route 2000::/125 fd00:a::1" -c "ipv6 route 2000::8/125 2000::1a" -c "ipv6 route 2000::10/125 2000::1a" -c "ipv6 route 2000::20/125 2000::1a" -c "ip route 9.0.0.0/24 10.255.255.2" -c "ip route 11.0.0.0/24 10.255.255.2" -c "ip route 200.0.0.4/30 10.255.255.2" -c "ip route 200.0.0.8/30 10.255.255.2" -c "end" -c "write" ;;
+        2) $VTY -c "conf t" -c "ipv6 route 2000::/125 2000::19" -c "ipv6 route 2000::10/125 2000::22" -c "end" -c "write" ;;
+        3) $VTY -c "conf t" -c "ip route 8.0.0.0/24 10.255.255.1" -c "ip route 200.0.0.0/30 10.255.255.1" -c "ip route 11.0.0.0/24 200.0.0.6" -c "ipv6 route 2000::18/125 2000::21" -c "ipv6 route 2000::/125 2000::21" -c "ipv6 route 2000::8/125 2000::21" -c "ipv6 route 2000::10/125 fd00:b::2" -c "end" -c "write" ;;
+        4) $VTY -c "conf t" -c "ip route 8.0.0.0/24 200.0.0.5" -c "ip route 9.0.0.0/24 200.0.0.5" -c "ip route 11.0.0.0/24 200.0.0.10" -c "ipv6 route 2000::/110 fd00:b::1" -c "end" -c "write" ;;
+        5) $VTY -c "conf t" -c "ip route 0.0.0.0/0 200.0.0.9" -c "end" -c "write" ;;
     esac
 
 elif [[ $GRP -eq 1 ]]; then
-    # OSPF (Sintaxis moderna corregida para evitar el error deprecado)
+    # OSPF
     RID="0.0.0.$ID"
     case $MOD in
-        0) $VTY -c "conf t" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface tunR1" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "exit" -c "write" ;;
-        1) $VTY -c "conf t" -c "router ospf" -c "network 8.0.0.0/24 area 0" -c "network 10.255.255.0/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s8" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface tunR0" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "exit" -c "write" ;;
-        2) $VTY -c "conf t" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface enp0s8" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface enp0s9" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "exit" -c "write" ;;
-        3) $VTY -c "conf t" -c "router ospf" -c "network 9.0.0.0/24 area 0" -c "network 10.255.255.0/30 area 0" -c "network 200.0.0.4/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "exit" -c "write" ;;
-        4) $VTY -c "conf t" -c "router ospf" -c "network 200.0.0.4/30 area 0" -c "network 200.0.0.8/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s9" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface tunR3" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "exit" -c "write" ;;
-        5) $VTY -c "conf t" -c "router ospf" -c "network 200.0.0.8/30 area 0" -c "network 11.0.0.0/24 area 0" -c "redistribute connected" -c "exit" -c "write" ;;
+        0) $VTY -c "conf t" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface tunR1" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "end" -c "write" ;;
+        1) $VTY -c "conf t" -c "router ospf" -c "network 8.0.0.0/24 area 0" -c "network 10.255.255.0/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s8" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface tunR0" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "end" -c "write" ;;
+        2) $VTY -c "conf t" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface enp0s8" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface enp0s9" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "end" -c "write" ;;
+        3) $VTY -c "conf t" -c "router ospf" -c "network 9.0.0.0/24 area 0" -c "network 10.255.255.0/30 area 0" -c "network 200.0.0.4/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "end" -c "write" ;;
+        4) $VTY -c "conf t" -c "router ospf" -c "network 200.0.0.4/30 area 0" -c "network 200.0.0.8/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s9" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface tunR3" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "end" -c "write" ;;
+        5) $VTY -c "conf t" -c "router ospf" -c "network 200.0.0.8/30 area 0" -c "network 11.0.0.0/24 area 0" -c "redistribute connected" -c "end" -c "write" ;;
     esac
 
 elif [[ $GRP -eq 3 ]]; then
     # RIP
     case $MOD in
-        0) $VTY -c "conf t" -c "router ripng" -c "network enp0s3" -c "network tunR1" -c "redistribute connected" -c "exit" -c "write" ;;
-        1) $VTY -c "conf t" -c "router rip" -c "network enp0s9" -c "network tunR3" -c "redistribute connected" -c "exit" -c "router ripng" -c "network enp0s8" -c "network tunR0" -c "redistribute connected" -c "exit" -c "write" ;;
-        2) $VTY -c "conf t" -c "router ripng" -c "network enp0s3" -c "network enp0s8" -c "network enp0s9" -c "redistribute connected" -c "exit" -c "write" ;;
-        3) $VTY -c "conf t" -c "router rip" -c "network enp0s8" -c "network enp0s9" -c "network tunR1" -c "redistribute connected" -c "exit" -c "router ripng" -c "network enp0s3" -c "redistribute connected" -c "exit" -c "write" ;;
-        4) $VTY -c "conf t" -c "router rip" -c "network enp0s3" -c "network enp0s8" -c "redistribute connected" -c "exit" -c "router ripng" -c "network enp0s9" -c "network tunR3" -c "redistribute connected" -c "exit" -c "write" ;;
-        5) $VTY -c "conf t" -c "router rip" -c "network enp0s3" -c "network enp0s8" -c "redistribute connected" -c "exit" -c "write" ;;
+        0) $VTY -c "conf t" -c "router ripng" -c "network enp0s3" -c "network tunR1" -c "redistribute connected" -c "end" -c "write" ;;
+        1) $VTY -c "conf t" -c "router rip" -c "network enp0s9" -c "network tunR3" -c "redistribute connected" -c "exit" -c "router ripng" -c "network enp0s8" -c "network tunR0" -c "redistribute connected" -c "end" -c "write" ;;
+        2) $VTY -c "conf t" -c "router ripng" -c "network enp0s3" -c "network enp0s8" -c "network enp0s9" -c "redistribute connected" -c "end" -c "write" ;;
+        3) $VTY -c "conf t" -c "router rip" -c "network enp0s8" -c "network enp0s9" -c "network tunR1" -c "redistribute connected" -c "exit" -c "router ripng" -c "network enp0s3" -c "redistribute connected" -c "end" -c "write" ;;
+        4) $VTY -c "conf t" -c "router rip" -c "network enp0s3" -c "network enp0s8" -c "redistribute connected" -c "exit" -c "router ripng" -c "network enp0s9" -c "network tunR3" -c "redistribute connected" -c "end" -c "write" ;;
+        5) $VTY -c "conf t" -c "router rip" -c "network enp0s3" -c "network enp0s8" -c "redistribute connected" -c "end" -c "write" ;;
     esac
 fi
 
-# 5. Seguridad Exclusiva
+# 5. Seguridad Exclusiva (Se asume iptables instalado)
 if [[ $GRP -eq 2 ]]; then
     echo "[*] Aplicando Firewall Estricto..."
-    if ! command -v iptables &> /dev/null; then
-        echo "[!] Instalando iptables automáticamente..."
-        apt-get update -y && apt-get install iptables -y
-    fi
     iptables -F; ip6tables -F
     iptables -P FORWARD DROP; ip6tables -P FORWARD DROP
     iptables -A FORWARD -p icmp -j ACCEPT; ip6tables -A FORWARD -p ipv6-icmp -j ACCEPT
