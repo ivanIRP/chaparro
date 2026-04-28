@@ -1,151 +1,97 @@
 #!/bin/bash
-# ==============================================================================
-# SCRIPT MONOLÍTICO V5 - CONFIGURACIÓN PURA + PARCHE OSPF VIRTUALBOX
-# ==============================================================================
+# =========================================================
+# SCRIPT DE VICTORIA FINAL - PROYECTO REDES (Basado en Imagen v6.2)
+# Iván, asegúrate de cambiar el ID antes de ejecutar:
+# =========================================================
+ID=1  # <--- CAMBIA ESTO (0, 1, 2, 3, 4, or 5)
 
-# Forzar la carga de rutas de administrador
-export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+echo "--- Aplicando configuración maestra al Router $ID ---"
 
-if [[ $EUID -ne 0 ]]; then echo "ERROR: Ejecuta con sudo"; exit 1; fi
+# --- CAPA 1: LIMPIEZA TOTAL Y FIREWALL (Abrir compuertas) ---
+iptables -F && ip6tables -F
+iptables -P FORWARD ACCEPT && ip6tables -P FORWARD ACCEPT
+iptables -P INPUT ACCEPT && ip6tables -P INPUT ACCEPT
+iptables -P OUTPUT ACCEPT && ip6tables -P OUTPUT ACCEPT
+sysctl -w net.ipv4.ip_forward=1
+sysctl -w net.ipv6.conf.all.forwarding=1
+ip -6 neigh flush all
 
-IP="/sbin/ip"
-VTY="/usr/bin/vtysh"
+# --- CAPA 2: MARTILLAZOS AL KERNEL (Rutas Directas para Túneles y Extremos) ---
+# Esto soluciona los problemas de VirtualBox forzando la salida por interfaz
+if [ $ID -eq 1 ]; then
+    # Rutas para el Túnel IPv4 (R1-R4)
+    ip route add 11.0.0.0/24 dev tunR4 2>/dev/null
+    # Rutas para el Túnel IPv6 (R1-R4)
+    ip -6 route add 2000::/125 via 2000::1a 2>/dev/null # Hacia R4 por R2
+    ip -6 route add 2000::10/125 dev tunR4_v6 2>/dev/null # Hacia PC5 por túnel v6
+    # Rutas hacia los extremos locales
+    ip route add 8.0.0.0/24 dev enp0s3 2>/dev/null
+    ip -6 route add 2000::/125 dev enp0s3 2>/dev/null
 
-read -p "Ingresa el número de este Router (del 0 al 23): " ID
+elif [ $ID -eq 2 ]; then
+    # R2 es el puente central IPv6
+    ip -6 route add 2000::19/128 dev enp0s3 2>/dev/null # Hacia R1
+    ip -6 route add 2000::1a/128 dev enp0s8 2>/dev/null # Hacia R3
 
-if [[ $ID -lt 0 || $ID -gt 23 ]]; then
-    echo "Número inválido. Debe ser entre 0 y 23."
-    exit 1
+elif [ $ID -eq 3 ]; then
+    # R3 es el puente central IPv6
+    ip -6 route add 2000::21/128 dev enp0s3 2>/dev/null # Hacia R2
+    ip -6 route add 2000::22/128 dev enp0s8 2>/dev/null # Hacia R4
+
+elif [ $ID -eq 4 ]; then
+    # Rutas de regreso para el Túnel IPv4 (R4-R1)
+    ip route add 8.0.0.0/24 dev tunR1 2>/dev/null
+    # Rutas de regreso para el Túnel IPv6 (R4-R1)
+    ip -6 route add 2000::8/125 via 2000::21 2>/dev/null # Hacia R1 por R3
+    ip -6 route add 2000::/125 dev tunR1_v6 2>/dev/null # Hacia PC0 por túnel v6
+    # Rutas hacia los extremos locales
+    ip route add 11.0.0.0/24 dev enp0s8 2>/dev/null
+    ip -6 route add 2000::10/125 dev enp0s8 2>/dev/null
 fi
 
-MOD=$((ID % 6))
-GRP=$((ID / 6))
-ESCENARIOS=("Estático (R0-R5)" "OSPF Híbrido (R6-R11)" "ACLs+Firewall (R12-R17)" "RIP/RIPng (R18-R23)")
-
-echo "======================================================="
-echo "[*] Preparando R$ID | ${ESCENARIOS[$GRP]} | Pos: $MOD"
-echo "======================================================="
-
-# 1. Destrucción de la memoria residual (Mata rutas fantasma)
-echo "[*] Limpiando red y reiniciando FRR..."
-systemctl stop frr
-rm -f /etc/frr/frr.conf
-cat <<EOF > /etc/frr/frr.conf
-frr version 8.4
-frr defaults traditional
-hostname Router_$ID
-no ipv6 forwarding
-!
-EOF
-chown frr:frr /etc/frr/frr.conf
-
-/sbin/modprobe sit 2>/dev/null; /sbin/modprobe ip6_tunnel 2>/dev/null
-echo 1 > /proc/sys/net/ipv4/ip_forward; echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
-for t in tunR0 tunR1 tunR3 tunR4; do $IP tunnel del $t 2>/dev/null; done
-for i in enp0s3 enp0s8 enp0s9; do $IP addr flush dev $i 2>/dev/null; done
-
-# 2. Configurar Demonios de FRR
-sed -i 's/ospfd=yes/ospfd=no/g' /etc/frr/daemons
-sed -i 's/ospf6d=yes/ospf6d=no/g' /etc/frr/daemons
-sed -i 's/ripd=yes/ripd=no/g' /etc/frr/daemons
-sed -i 's/ripngd=yes/ripngd=no/g' /etc/frr/daemons
-
-if [ $GRP -eq 1 ]; then
-    sed -i 's/ospfd=no/ospfd=yes/g' /etc/frr/daemons
-    sed -i 's/ospf6d=no/ospf6d=yes/g' /etc/frr/daemons
-elif [ $GRP -eq 3 ]; then
-    sed -i 's/ripd=no/ripd=yes/g' /etc/frr/daemons
-    sed -i 's/ripngd=no/ripngd=yes/g' /etc/frr/daemons
-fi
-systemctl start frr
-sleep 2
-
-# 3. Asignación IP y Túneles (Capa Física compartida)
-case $MOD in
-    0) 
-        $IP addr add 2000::2/125 dev enp0s3; $IP addr add 200.0.0.1/30 dev enp0s8
-        $IP link set enp0s3 up; $IP link set enp0s8 up
-        $IP tunnel add tunR1 mode sit remote 200.0.0.2 local 200.0.0.1
-        $IP link set tunR1 up; $IP addr add fd00:a::1/126 dev tunR1
-        ;;
-    1) 
-        $IP addr add 200.0.0.2/30 dev enp0s3; $IP addr add 2000::19/125 dev enp0s8; $IP addr add 8.0.0.254/24 dev enp0s9
-        $IP link set enp0s3 up; $IP link set enp0s8 up; $IP link set enp0s9 up
-        $IP tunnel add tunR0 mode sit remote 200.0.0.1 local 200.0.0.2
-        $IP link set tunR0 up; $IP addr add fd00:a::2/126 dev tunR0
-        $IP -6 tunnel add tunR3 mode ipip6 remote 2000::22 local 2000::19
-        $IP link set tunR3 up; $IP addr add 10.255.255.1/30 dev tunR3
-        ;;
-    2) 
-        $IP addr add 2000::1a/125 dev enp0s3; $IP addr add 2000::21/125 dev enp0s8; $IP addr add 2000::a/125 dev enp0s9
-        $IP link set enp0s3 up; $IP link set enp0s8 up; $IP link set enp0s9 up
-        ;;
-    3) 
-        $IP addr add 2000::22/125 dev enp0s3; $IP addr add 200.0.0.5/30 dev enp0s8; $IP addr add 9.0.0.254/24 dev enp0s9
-        $IP link set enp0s3 up; $IP link set enp0s8 up; $IP link set enp0s9 up
-        $IP -6 tunnel add tunR1 mode ipip6 remote 2000::19 local 2000::22
-        $IP link set tunR1 up; $IP addr add 10.255.255.2/30 dev tunR1
-        $IP tunnel add tunR4 mode sit remote 200.0.0.6 local 200.0.0.5
-        $IP link set tunR4 up; $IP addr add fd00:b::1/126 dev tunR4
-        ;;
-    4) 
-        $IP addr add 200.0.0.6/30 dev enp0s3; $IP addr add 200.0.0.9/30 dev enp0s8; $IP addr add 2000::12/125 dev enp0s9
-        $IP link set enp0s3 up; $IP link set enp0s8 up; $IP link set enp0s9 up
-        $IP tunnel add tunR3 mode sit remote 200.0.0.5 local 200.0.0.6
-        $IP link set tunR3 up; $IP addr add fd00:b::2/126 dev tunR3
-        ;;
-    5) 
-        $IP addr add 200.0.0.10/30 dev enp0s3; $IP addr add 11.0.0.254/24 dev enp0s8
-        $IP link set enp0s3 up; $IP link set enp0s8 up
-        ;;
+# --- CAPA 3: CONFIGURACIÓN FRR (VTYSH) ---
+# Esta sección configura las rutas estáticas de FRR según la imagen
+case $ID in
+  0)
+    vtysh -c "conf t" \
+    -c "ip route 0.0.0.0/0 8.0.0.254" \
+    -c "ipv6 route ::/0 2000::1" \
+    -c "exit" -c "write"
+    ;;
+  1)
+    vtysh -c "conf t" \
+    -c "ip route 11.0.0.0/24 10.255.255.2" \
+    -c "ipv6 route 2000::10/125 2000::22" \
+    -c "ipv6 route 2000::10/125 fd00:b::2" \
+    -c "ipv6 route 2000::/125 2000::" \
+    -c "exit" -c "write"
+    ;;
+  2)
+    vtysh -c "conf t" \
+    -c "ipv6 route 2000::/125 2000::19" \
+    -c "ipv6 route 2000::20/125 2000::1a" \
+    -c "exit" -c "write"
+    ;;
+  3)
+    vtysh -c "conf t" \
+    -c "ipv6 route 2000::8/125 2000::21" \
+    -c "ipv6 route 2000::10/125 2000::22" \
+    -c "exit" -c "write"
+    ;;
+  4)
+    vtysh -c "conf t" \
+    -c "ip route 8.0.0.0/24 10.255.255.1" \
+    -c "ipv6 route 2000::/125 2000::21" \
+    -c "ipv6 route 2000::/125 fd00:a::1" \
+    -c "ipv6 route 2000::10/125 2000::110" \
+    -c "exit" -c "write"
+    ;;
+  5)
+    vtysh -c "conf t" \
+    -c "ip route 0.0.0.0/0 11.0.0.254" \
+    -c "ipv6 route ::/0 2000::110" \
+    -c "exit" -c "write"
+    ;;
 esac
 
-# 4. Lógica de Enrutamiento Dinámica por Bloque
-echo "[*] Inyectando Protocolos de FRR..."
-if [[ $GRP -eq 0 || $GRP -eq 2 ]]; then
-    # ESTÁTICAS Y ACLs
-    case $MOD in
-        0) $VTY -c "conf t" -c "ipv6 route 2000::/110 fd00:a::2" -c "end" -c "write" ;;
-        1) $VTY -c "conf t" -c "ipv6 route 2000::/125 fd00:a::1" -c "ipv6 route 2000::8/125 2000::1a" -c "ipv6 route 2000::10/125 2000::1a" -c "ipv6 route 2000::20/125 2000::1a" -c "ip route 9.0.0.0/24 10.255.255.2" -c "ip route 11.0.0.0/24 10.255.255.2" -c "ip route 200.0.0.4/30 10.255.255.2" -c "ip route 200.0.0.8/30 10.255.255.2" -c "end" -c "write" ;;
-        2) $VTY -c "conf t" -c "ipv6 route 2000::/125 2000::19" -c "ipv6 route 2000::10/125 2000::22" -c "end" -c "write" ;;
-        3) $VTY -c "conf t" -c "ip route 8.0.0.0/24 10.255.255.1" -c "ip route 200.0.0.0/30 10.255.255.1" -c "ip route 11.0.0.0/24 200.0.0.6" -c "ipv6 route 2000::18/125 2000::21" -c "ipv6 route 2000::/125 2000::21" -c "ipv6 route 2000::8/125 2000::21" -c "ipv6 route 2000::10/125 fd00:b::2" -c "end" -c "write" ;;
-        4) $VTY -c "conf t" -c "ip route 8.0.0.0/24 200.0.0.5" -c "ip route 9.0.0.0/24 200.0.0.5" -c "ip route 11.0.0.0/24 200.0.0.10" -c "ipv6 route 2000::/110 fd00:b::1" -c "end" -c "write" ;;
-        5) $VTY -c "conf t" -c "ip route 0.0.0.0/0 200.0.0.9" -c "end" -c "write" ;;
-    esac
-
-elif [[ $GRP -eq 1 ]]; then
-    # OSPF HÍBRIDO (El parche para vencer a VirtualBox va incluido aquí)
-    RID="0.0.0.$ID"
-    case $MOD in
-        0) $VTY -c "conf t" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface tunR1" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "end" -c "write" ;;
-        1) $VTY -c "conf t" -c "router ospf" -c "network 8.0.0.0/24 area 0" -c "network 10.255.255.0/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s8" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "interface tunR0" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "interface tunR3" -c "ip ospf network point-to-point" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "exit" -c "ipv6 route 2000::20/125 2000::1a" -c "ipv6 route 2000::10/125 2000::1a" -c "end" -c "write" ;;
-        2) $VTY -c "conf t" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "interface enp0s8" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "interface enp0s9" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "exit" -c "ipv6 route 2000::/125 2000::19" -c "ipv6 route 2000::10/125 2000::22" -c "end" -c "write" ;;
-        3) $VTY -c "conf t" -c "router ospf" -c "network 9.0.0.0/24 area 0" -c "network 10.255.255.0/30 area 0" -c "network 200.0.0.4/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s3" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "interface tunR4" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "interface tunR1" -c "ip ospf network point-to-point" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "exit" -c "ipv6 route 2000::18/125 2000::21" -c "ipv6 route 2000::/125 2000::21" -c "end" -c "write" ;;
-        4) $VTY -c "conf t" -c "router ospf" -c "network 200.0.0.4/30 area 0" -c "network 200.0.0.8/30 area 0" -c "redistribute connected" -c "exit" -c "interface enp0s9" -c "ipv6 ospf6 area 0.0.0.0" -c "exit" -c "interface tunR3" -c "ipv6 ospf6 area 0.0.0.0" -c "ipv6 ospf6 network point-to-point" -c "exit" -c "router ospf6" -c "ospf6 router-id $RID" -c "redistribute connected" -c "end" -c "write" ;;
-        5) $VTY -c "conf t" -c "router ospf" -c "network 200.0.0.8/30 area 0" -c "network 11.0.0.0/24 area 0" -c "redistribute connected" -c "end" -c "write" ;;
-    esac
-
-elif [[ $GRP -eq 3 ]]; then
-    # RIP
-    case $MOD in
-        0) $VTY -c "conf t" -c "router ripng" -c "network enp0s3" -c "network tunR1" -c "redistribute connected" -c "end" -c "write" ;;
-        1) $VTY -c "conf t" -c "router rip" -c "network enp0s9" -c "network tunR3" -c "redistribute connected" -c "exit" -c "router ripng" -c "network enp0s8" -c "network tunR0" -c "redistribute connected" -c "end" -c "write" ;;
-        2) $VTY -c "conf t" -c "router ripng" -c "network enp0s3" -c "network enp0s8" -c "network enp0s9" -c "redistribute connected" -c "end" -c "write" ;;
-        3) $VTY -c "conf t" -c "router rip" -c "network enp0s8" -c "network enp0s9" -c "network tunR1" -c "redistribute connected" -c "exit" -c "router ripng" -c "network enp0s3" -c "redistribute connected" -c "end" -c "write" ;;
-        4) $VTY -c "conf t" -c "router rip" -c "network enp0s3" -c "network enp0s8" -c "redistribute connected" -c "exit" -c "router ripng" -c "network enp0s9" -c "network tunR3" -c "redistribute connected" -c "end" -c "write" ;;
-        5) $VTY -c "conf t" -c "router rip" -c "network enp0s3" -c "network enp0s8" -c "redistribute connected" -c "end" -c "write" ;;
-    esac
-fi
-
-# 5. Seguridad Exclusiva (Se asume iptables instalado)
-if [[ $GRP -eq 2 ]]; then
-    echo "[*] Aplicando Firewall Estricto..."
-    iptables -F; ip6tables -F
-    iptables -P FORWARD DROP; ip6tables -P FORWARD DROP
-    iptables -A FORWARD -p icmp -j ACCEPT; ip6tables -A FORWARD -p ipv6-icmp -j ACCEPT
-    iptables -A FORWARD -p 41 -j ACCEPT; ip6tables -A FORWARD -p 4 -j ACCEPT
-    iptables -A FORWARD -s 8.0.0.0/8 -j ACCEPT; iptables -A FORWARD -s 9.0.0.0/8 -j ACCEPT; iptables -A FORWARD -s 11.0.0.0/8 -j ACCEPT
-    ip6tables -A FORWARD -s 2000::/3 -j ACCEPT
-fi
-
-echo "[!] R$ID CONFIGURADO CORRECTAMENTE."
+echo "--- Router $ID LISTO. El escenario de la imagen está configurado. ---"
